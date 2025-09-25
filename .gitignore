@@ -2,3 +2,8 @@ MobiFall_Dataset
 UMAFall_Dataset
 HAR-UP_Dataset.csv
 *.bkp
+
+*.npy
+*.pth
+__pycache__/
+*.gz
