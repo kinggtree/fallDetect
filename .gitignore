@@ -7,3 +7,5 @@ HAR-UP_Dataset.csv
 *.pth
 __pycache__/
 *.gz
+
+simulated_features/
