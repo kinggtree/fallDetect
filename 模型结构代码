@@ -1,0 +1,65 @@
+graph TD
+    A[输入: feature_sequence] --> B[LSTM模块];
+    A2[输入: raw_data] --> C[1D-CNN模块];
+    
+    B --> B1[LSTM输出];
+    B1 --> B2[取最后时间步 lstm_last_output];
+    
+    C --> C1[11通道输入];
+    C1 --> C2[Conv1d 64通道];
+    C2 --> C3[ReLU + BatchNorm];
+    C3 --> C4[MaxPool1d];
+    C4 --> C5[Conv1d 128通道];
+    C5 --> C6[ReLU + BatchNorm];
+    C6 --> C7[MaxPool1d];
+    C7 --> C8[Conv1d 256通道];
+    C8 --> C9[ReLU + BatchNorm];
+    C9 --> C10[MaxPool1d];
+    C10 --> C11[Flatten];
+    C11 --> C12[CNN输出 v_raw];
+    
+    B2 --> D[特征拼接];
+    C12 --> D;
+    D --> E[门控层];
+    
+    E --> E1[Linear + ReLU];
+    E1 --> E2[Linear];
+    E2 --> E3[Sigmoid];
+    E3 --> F[门控值 gate];
+    
+    C12 --> G[线性变换];
+    G --> H[变换后的CNN特征];
+    
+    B2 --> I[特征融合];
+    F --> I;
+    H --> I;
+    I --> J[融合向量 fused_vector];
+    
+    J --> K[分类器];
+    K --> K1[Linear + ReLU];
+    K1 --> K2[Dropout];
+    K2 --> K3[Linear];
+    K3 --> L[输出logits];
+    
+    B --> M[LSTM隐藏状态];
+    M --> N[状态特征 state_feature];
+    
+    L --> O[最终输出];
+    N --> O;
+    F --> O;
+    
+    subgraph "1D-CNN处理原始数据"
+        C1 --> C2 --> C3 --> C4 --> C5 --> C6 --> C7 --> C8 --> C9 --> C10 --> C11
+    end
+    
+    subgraph "门控融合机制"
+        D --> E --> F
+        B2 --> I
+        G --> H --> I
+    end
+
+    style B fill:#e1f5fe
+    style C fill:#f3e5f5
+    style E fill:#fff3e0
+    style I fill:#e8f5e8
+    style K fill:#fce4ec
