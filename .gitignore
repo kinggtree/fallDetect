@@ -9,3 +9,5 @@ __pycache__/
 *.gz
 
 simulated_features/
+
+precomputed_dataset/
