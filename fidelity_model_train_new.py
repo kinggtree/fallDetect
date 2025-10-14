@@ -412,7 +412,7 @@ if __name__ == "__main__":
             model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
             print(f"模型已从 {MODEL_PATH} 加载")
         else:
-            print(f"警告: 在 {MODEL_PATH} 未找到模型文件。将使用随机初始化的模型。")
+            raise FileNotFoundError(f"ERROR: Model file not found at '{MODEL_PATH}'. Cannot proceed without it.")
         model.eval()
         if os.path.exists(SCALER_PATH):
             scaler = joblib.load(SCALER_PATH)
