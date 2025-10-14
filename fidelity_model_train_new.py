@@ -18,8 +18,11 @@ from torch.utils.data import Dataset, DataLoader, Subset
 DATASET_PATH = 'MobiFall_Dataset'
 TARGET_SAMPLING_RATE_HZ = 50.0
 TARGET_SAMPLING_PERIOD = f"{int(1000 / TARGET_SAMPLING_RATE_HZ)}ms"
-WINDOW_SECONDS = 4
+WINDOW_SECONDS = 2
 WINDOW_SIZE = int(TARGET_SAMPLING_RATE_HZ * WINDOW_SECONDS)
+
+SEQUENCE_LENGTH = 8  # 每个序列包含x个时间步
+STRIDE = 1           # 每隔x步创建一个新的序列
 
 STEP_SECONDS = 1
 STEP = int(TARGET_SAMPLING_RATE_HZ * STEP_SECONDS)
@@ -176,25 +179,40 @@ def create_sequences(data_list, label_list, seq_length, step):
     return np.array(X), np.array(y)
 
 class FeatureModel1DCNN(nn.Module):
-    def __init__(self, input_channels=11, num_classes=1):
+    def __init__(self, input_channels=11, num_classes=1, sequence_length=200): # 添加 sequence_length 参数
         super(FeatureModel1DCNN, self).__init__()
+        
+        # 特征提取器: 包含一系列的卷积和池化层
         self.feature_extractor = nn.Sequential(
+            # Block 1
             nn.Conv1d(in_channels=input_channels, out_channels=64, kernel_size=3, padding='same'),
             nn.ReLU(),
             nn.BatchNorm1d(64),
-            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.MaxPool1d(kernel_size=2, stride=2), # Length: L -> L/2
+            
+            # Block 2
             nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding='same'),
             nn.ReLU(),
             nn.BatchNorm1d(128),
-            nn.MaxPool1d(kernel_size=2, stride=2),
+            nn.MaxPool1d(kernel_size=2, stride=2), # Length: L/2 -> L/4
+
+            # Block 3
             nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3, padding='same'),
             nn.ReLU(),
             nn.BatchNorm1d(256),
-            nn.MaxPool1d(kernel_size=2, stride=2)
+            nn.MaxPool1d(kernel_size=2, stride=2)  # Length: L/4 -> L/8
         )
+        
+        # --- 动态计算分类器的输入维度 ---
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, input_channels, sequence_length)
+            dummy_output = self.feature_extractor(dummy_input)
+            flattened_size = dummy_output.numel()
+
+        # 分类器: 将提取的特征映射到最终的输出
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(256 * 25, 512),
+            nn.Linear(flattened_size, 512), # <-- 使用动态计算出的大小
             nn.ReLU(),
             nn.Dropout(0.5),
             nn.Linear(512, num_classes)
@@ -382,6 +400,7 @@ def evaluate_model(model, loader, criterion, device):
 
 if __name__ == "__main__":
     SensorDataSequences, SensorLabelSequences = np.array([]), np.array([])
+    trial_arrays, trial_labels = load_data_from_structured_folders(DATASET_PATH)
 
     if os.path.exists('SensorDataSequences.npy') and os.path.exists('SensorLabelSequences.npy'):
         print("Found existing npy files. Loading...")
@@ -390,7 +409,6 @@ if __name__ == "__main__":
         SensorLabelSequences = np.load('SensorLabelSequences.npy')
         print(f"Loaded dataset shape: y={SensorLabelSequences.shape}")
     else:
-        trial_arrays, trial_labels = load_data_from_structured_folders(DATASET_PATH)
         SensorDataSequences, SensorLabelSequences = create_sequences(trial_arrays, trial_labels, WINDOW_SIZE, STEP)
         print(f"The shape of the final dataset is: X={SensorDataSequences.shape}, y={SensorLabelSequences.shape}")
         np.save('SensorDataSequences.npy', SensorDataSequences)
@@ -407,7 +425,13 @@ if __name__ == "__main__":
         print("未找到现有的特征文件，开始生成新的特征文件...")
         print("正在加载模型和标准化器...")
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        model = FeatureModel1DCNN(input_channels=11, num_classes=1).to(device)
+    
+        model = FeatureModel1DCNN(
+            input_channels=11, 
+            num_classes=1, 
+            sequence_length=WINDOW_SIZE
+        ).to(device)
+
         if os.path.exists(MODEL_PATH):
             model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
             print(f"模型已从 {MODEL_PATH} 加载")
@@ -460,8 +484,6 @@ if __name__ == "__main__":
     SPARSITY_RATIO = 0.2 
     raw_windows = create_sparse_data(raw_windows_original, SPARSITY_RATIO)
 
-    SEQUENCE_LENGTH = 4
-    STRIDE = 2
     BATCH_SIZE = 32
     TEST_SIZE = 0.2
     VALIDATION_SIZE = 0.15
@@ -507,9 +529,22 @@ if __name__ == "__main__":
 
     print("\n--- Model Training and Evaluation ---")
 
-    FEATURE_DIM = 6400
+    # --- 动态计算模型超参数 ---
+    # 使用一个虚拟张量来推断raw_cnn模块的输出维度
+    dummy_cnn_input = torch.randn(1, 11, WINDOW_SIZE) 
+    temp_cnn = create_raw_data_cnn()
+    dummy_cnn_output = temp_cnn(dummy_cnn_input)
+    RAW_CNN_OUTPUT_DIM = dummy_cnn_output.shape[1] # 获取展平后的特征维度
+
+    # 特征维度也应该是动态的
+    # final_features 是从 all_features.npy 加载的
+    FEATURE_DIM = final_features.shape[1]
+
+    # 验证两个维度是否一致 (理想情况下它们应该由同一个CNN结构产生)
+    if FEATURE_DIM != RAW_CNN_OUTPUT_DIM:
+        raise ValueError(f"Feature dimension from file ({FEATURE_DIM}) does not match calculated CNN output dimension ({RAW_CNN_OUTPUT_DIM}). Please check the feature extraction process.")
+
     LSTM_HIDDEN_DIM = 256
-    RAW_CNN_OUTPUT_DIM = 6400
     NUM_CLASSES = 1
     LEARNING_RATE = 0.0001
     EPOCHS = 10

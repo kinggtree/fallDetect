@@ -11,8 +11,8 @@ import torch.nn as nn
 HISTORY_DATA_POOL_URL = "http://127.0.0.1:5001/get_raw_data_chunk"
 FEATURE_POOL_URL = "http://127.0.0.1:5002/get_feature"
 MODEL_PATH = ".\\contextual_fidelity_model.pth"
-REQUEST_INTERVAL_SECONDS = 0.5 # 每4秒请求一次特征
-SEQUENCE_LENGTH = 4            # 累积4个特征后进行一次推理
+REQUEST_INTERVAL_SECONDS = 0.5 # 每x秒请求一次特征
+SEQUENCE_LENGTH = 8            # 累积x个特征后进行一次推理
 
 class TimeDistributed(nn.Module):
     def __init__(self, module):
@@ -124,9 +124,9 @@ def load_model(model_path):
     print(f"Loading model from {model_path}...")
     
     # --- 模型超参数 (需要和训练时保持一致) ---
-    FEATURE_DIM = 6400
+    FEATURE_DIM = 3072
     LSTM_HIDDEN_DIM = 256
-    RAW_CNN_OUTPUT_DIM = 6400
+    RAW_CNN_OUTPUT_DIM = 3072
     NUM_CLASSES = 1
     
     model = ContextualFidelityModel(FEATURE_DIM, LSTM_HIDDEN_DIM, RAW_CNN_OUTPUT_DIM, NUM_CLASSES)

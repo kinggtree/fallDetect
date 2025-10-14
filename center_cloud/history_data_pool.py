@@ -9,6 +9,8 @@ HOST = '127.0.0.1'
 PORT = 5001
 RAW_DATA_PATH = ".\\SensorDataSequences.npy"  # 假设您已将变量SensorDataSequences保存为SensorDataSequences.npy
 SPARSITY_RATIO = 0.8     # 大幅稀疏化，例如80%的数据被置零
+# 请求样本数，应与model_runner中的SEQUENCE_LENGTH保持一致
+REQUEST_SAMPLE_COUNT = 8
 
 # --- 全局变量 ---
 SPARSE_RAW_DATA = None
@@ -46,7 +48,7 @@ app = Flask(__name__)
 def get_raw_data_chunk():
     global CURRENT_INDEX
     with data_lock:
-        chunk_size = 4 # 客户端每次请求4个样本
+        chunk_size = REQUEST_SAMPLE_COUNT
         if CURRENT_INDEX + chunk_size > len(SPARSE_RAW_DATA):
             return jsonify({"error": "End of data"}), 404
 
