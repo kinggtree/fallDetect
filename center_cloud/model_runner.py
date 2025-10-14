@@ -115,6 +115,9 @@ class ContextualFidelityModel(nn.Module):
 
 
 
+
+
+
 # --- 模型加载 ---
 def load_model(model_path):
     """加载训练好的模型并设置为评估模式"""
@@ -179,10 +182,17 @@ def simulate_inference_loop(model):
             
             raw_data_chunk = response.json()['data_chunk']
             print("-> Received raw data chunk.")
+            raw_data_array = np.array(raw_data_chunk)
+
+
+            zero_vectors_count = np.sum(np.all(raw_data_array == 0, axis=(1, 2)))
+            print(f"全零向量占比: {zero_vectors_count / raw_data_array.shape[0]:.2f}")
+
+
 
             # 3. 准备模型输入
             feature_tensor = torch.tensor(np.array(feature_sequence), dtype=torch.float32).unsqueeze(0) # (1, 4, 6400)
-            raw_data_tensor = torch.tensor(np.array(raw_data_chunk), dtype=torch.float32).unsqueeze(0) # (1, 4, 200, 11)
+            raw_data_tensor = torch.tensor(raw_data_array, dtype=torch.float32).unsqueeze(0) # (1, 4, 200, 11)
             
             # 4. 模型推理
             print("\nRunning model inference...")
