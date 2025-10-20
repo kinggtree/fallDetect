@@ -12,7 +12,7 @@ import pandas as pd
 HISTORY_DATA_POOL_URL = "http://127.0.0.1:5001/get_raw_data_chunk"
 FEATURE_POOL_URL = "http://127.0.0.1:5002/get_feature"
 MODEL_PATH = ".\\contextual_fidelity_model.pth"
-REQUEST_INTERVAL_SECONDS = 0.5 # 每x秒请求一次特征
+REQUEST_INTERVAL_SECONDS = 0.1 # 每x秒请求一次特征
 SEQUENCE_LENGTH = 4            # 累积x个特征后进行一次推理
 
 class TimeDistributedEncoder(nn.Module):
@@ -232,8 +232,9 @@ def simulate_inference_loop(model):
             param_rows.append({
                 "Zero_Vectors_Ratio": zero_vectors_count / raw_data_array.shape[0],
                 "Probability": prediction_prob,
-                "Result": 1 if is_correct else 0,
-                "True_Label": true_label
+                "Predict_Label": prediction,
+                "True_Label": true_label,
+                "Result": 1 if is_correct else 0
             })
 
             # 6. 清空列表，为下一个序列做准备
