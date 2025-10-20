@@ -8,7 +8,7 @@ import threading
 HOST = '127.0.0.1'
 PORT = 5001
 RAW_DATA_PATH = ".\\SensorDataSequences.npy"
-SPARSITY_RATIO = 0.25
+SPARSITY_RATIO = 0.5
 REQUEST_SAMPLE_COUNT = 8
 
 # --- 全局变量 ---
@@ -30,7 +30,6 @@ def load_and_prepare_data():
     """加载并稀疏化原始数据"""
     global SPARSE_RAW_DATA
     print(f"Loading raw data from {RAW_DATA_PATH}...")
-    # 为了能独立运行，如果文件不存在则创建一个虚拟的X
     try:
         raw_data = np.load(RAW_DATA_PATH)
     except FileNotFoundError:

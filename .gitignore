@@ -19,3 +19,5 @@ autoregression_processed_data/
 extracted_features/
 
 scatter_plot.png
+
+simulate_log.csv

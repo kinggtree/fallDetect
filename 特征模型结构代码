@@ -1,0 +1,42 @@
+graph TD
+    subgraph Encoder
+        E_Input[输入序列 Source] --> E_LSTM[LSTM Encoder];
+        E_LSTM --> E_State[最终隐藏状态 hidden_cell];
+    end
+
+    subgraph Decoder_Autoregressive_Loop
+        D_Start[初始输入 start] --> D_LSTM_1[LSTM Decoder t=1];
+        D_LSTM_1 --> D_FC_1[Linear Layer t=1];
+        D_FC_1 --> D_Output_1[预测值 Output_1];
+
+        D_Output_1 -- "作为下一步输入" --> D_LSTM_2[LSTM Decoder t=2];
+        D_LSTM_2 --> D_FC_2[Linear Layer t=2];
+        D_FC_2 --> D_Output_2[预测值 Output_2];
+        
+        D_Output_2 -- "..." --> D_LSTM_n[LSTM Decoder t=n];
+        D_LSTM_n --> D_FC_n[Linear Layer t=n];
+        D_FC_n --> D_Output_n[预测值 Output_n];
+    end
+    
+    subgraph Context_Vector_Transfer
+        E_State -- "初始化解码器状态" --> D_LSTM_1;
+    end
+    
+    subgraph Hidden_State_Flow
+        style D_LSTM_1 fill:#f9f,stroke:#333,stroke-width:2px
+        style D_LSTM_2 fill:#f9f,stroke:#333,stroke-width:2px
+        style D_LSTM_n fill:#f9f,stroke:#333,stroke-width:2px
+        D_LSTM_1 -- "更新状态 h1_c1" --> D_LSTM_2;
+        D_LSTM_2 -- "更新状态 h2_c2" --> D_LSTM_n;
+    end
+
+    subgraph Teacher_Forcing_Training_only
+        style GroundTruth fill:#ccf,stroke:#333,stroke-width:2px
+        GroundTruth[真实目标 Target_t]
+        GroundTruth -.->|"以一定概率替代"| D_LSTM_2
+    end
+    
+    D_Output_n --> Final_Output[最终输出序列];
+
+    style Encoder fill:#bbf,stroke:#333,stroke-width:4px
+    style Decoder_Autoregressive_Loop fill:#bfb,stroke:#333,stroke-width:4px

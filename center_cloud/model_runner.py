@@ -12,7 +12,7 @@ import pandas as pd
 HISTORY_DATA_POOL_URL = "http://127.0.0.1:5001/get_raw_data_chunk"
 FEATURE_POOL_URL = "http://127.0.0.1:5002/get_feature"
 MODEL_PATH = ".\\contextual_fidelity_model.pth"
-REQUEST_INTERVAL_SECONDS = 0.1 # 每x秒请求一次特征
+REQUEST_INTERVAL_SECONDS = 0.05 # 每x秒请求一次特征
 SEQUENCE_LENGTH = 4            # 累积x个特征后进行一次推理
 
 class TimeDistributedEncoder(nn.Module):
