@@ -15,3 +15,5 @@ precomputed_dataset/
 autoregression_feature_extractor_model.pt
 
 autoregression_processed_data/
+
+extracted_features/
