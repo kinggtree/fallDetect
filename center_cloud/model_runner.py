@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import time
 import torch.nn as nn
+import pandas as pd
 
 
 # --- 配置 ---
@@ -12,20 +13,20 @@ HISTORY_DATA_POOL_URL = "http://127.0.0.1:5001/get_raw_data_chunk"
 FEATURE_POOL_URL = "http://127.0.0.1:5002/get_feature"
 MODEL_PATH = ".\\contextual_fidelity_model.pth"
 REQUEST_INTERVAL_SECONDS = 0.5 # 每x秒请求一次特征
-SEQUENCE_LENGTH = 8            # 累积x个特征后进行一次推理
+SEQUENCE_LENGTH = 4            # 累积x个特征后进行一次推理
 
-class TimeDistributed(nn.Module):
+class TimeDistributedEncoder(nn.Module):
     def __init__(self, module):
-        super(TimeDistributed, self).__init__()
+        super(TimeDistributedEncoder, self).__init__()
         self.module = module
 
     def forward(self, x):
-        
-        batch_size, time_steps = x.size(0), x.size(1)
-        x = x.permute(0, 1, 3, 2) # -> (B, 60, 11, 200)
-        x_reshape = x.contiguous().view(batch_size * time_steps, x.size(2), x.size(3))
-        y = self.module(x_reshape)        
-        y = y.view(batch_size, time_steps, y.size(-1))
+        batch_size, time_steps, seq_len, n_features = x.size()
+
+        x_reshape = x.contiguous().view(batch_size * time_steps, seq_len, n_features)
+        hidden, _ = self.module(x_reshape)
+        output_features = hidden[-1]
+        y = output_features.view(batch_size, time_steps, -1)
         
         return y
     
@@ -47,28 +48,30 @@ class CrossAttention(nn.Module):
         return context_vector
 
 
-def create_raw_data_cnn():
-    raw_data_processor = nn.Sequential(
-        nn.Conv1d(in_channels=11, out_channels=64, kernel_size=3, padding='same'), nn.ReLU(), nn.BatchNorm1d(64),
-        nn.MaxPool1d(kernel_size=2, stride=2),
-        nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding='same'), nn.ReLU(), nn.BatchNorm1d(128),
-        nn.MaxPool1d(kernel_size=2, stride=2),
-        nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3, padding='same'), nn.ReLU(), nn.BatchNorm1d(256),
-        nn.MaxPool1d(kernel_size=2, stride=2),
-        nn.Flatten()
-    )
-    return raw_data_processor
+class Encoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim, n_layers, dropout):
+        super(Encoder, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.n_layers = n_layers
+        self.lstm = nn.LSTM(input_dim, hidden_dim, n_layers, dropout=dropout, batch_first=True)
+
+    def forward(self, x):
+        # x shape: (batch_size, seq_len, input_dim)
+        outputs, (hidden, cell) = self.lstm(x)
+        # 返回最终的 hidden 和 cell 状态
+        return hidden, cell
 
 
 class ContextualFidelityModel(nn.Module):
-    def __init__(self, feature_dim, lstm_hidden_dim, raw_cnn_output_dim, num_classes=1):
+    # 参数名修改得更清晰
+    def __init__(self, lfs_feature_dim, lstm_hidden_dim, hfs_feature_dim, num_classes=1):
         super(ContextualFidelityModel, self).__init__()
 
-        raw_cnn = create_raw_data_cnn()
-        self.hfs_processor = TimeDistributed(raw_cnn)
+        hfs_encoder = Encoder(input_dim=11, hidden_dim=hfs_feature_dim, n_layers=2, dropout=0.1)
+        self.hfs_processor = TimeDistributedEncoder(hfs_encoder)
 
         self.lfs_processor = nn.LSTM(
-            input_size=feature_dim,
+            input_size=lfs_feature_dim, # 将接收64维特征
             hidden_size=lstm_hidden_dim,
             num_layers=2,
             batch_first=True,
@@ -77,8 +80,8 @@ class ContextualFidelityModel(nn.Module):
 
         self.cross_attention = CrossAttention(
             query_dim=lstm_hidden_dim,
-            key_dim=raw_cnn_output_dim,
-            hidden_dim=lstm_hidden_dim # 通常设置为与query_dim一致
+            key_dim=hfs_feature_dim, # 维度变为64
+            hidden_dim=lstm_hidden_dim
         )
         
         self.post_fusion_processor = nn.LSTM(
@@ -101,19 +104,17 @@ class ContextualFidelityModel(nn.Module):
             query=lfs_output, 
             key=hfs_output, 
             value=hfs_output
-        )
+        ) # -> (B, 60, lstm_hidden_dim)
+
         combined_features = torch.cat([lfs_output, attention_context], dim=-1)
 
         final_sequence, (h_n, _) = self.post_fusion_processor(combined_features)
         
         last_step_output = final_sequence[:, -1, :]
         logits = self.classifier(last_step_output)
-        
         state_feature = h_n.squeeze(0) # -> (B, lstm_hidden_dim)
 
         return logits, state_feature
-
-
 
 
 
@@ -124,13 +125,18 @@ def load_model(model_path):
     print(f"Loading model from {model_path}...")
     
     # --- 模型超参数 (需要和训练时保持一致) ---
-    FEATURE_DIM = 3072
+    LFS_FEATURE_DIM = 64
+    HFS_FEATURE_DIM = 64 
     LSTM_HIDDEN_DIM = 256
-    RAW_CNN_OUTPUT_DIM = 3072
     NUM_CLASSES = 1
     
-    model = ContextualFidelityModel(FEATURE_DIM, LSTM_HIDDEN_DIM, RAW_CNN_OUTPUT_DIM, NUM_CLASSES)
-    
+    model = ContextualFidelityModel(
+        lfs_feature_dim=LFS_FEATURE_DIM, 
+        lstm_hidden_dim=LSTM_HIDDEN_DIM, 
+        hfs_feature_dim=HFS_FEATURE_DIM, 
+        num_classes=NUM_CLASSES
+    )
+
     try:
         model.load_state_dict(torch.load(model_path))
     except FileNotFoundError:
@@ -152,6 +158,11 @@ def simulate_inference_loop(model):
     total_predictions = 0
     correct_predictions = 0
 
+    save_counter = 0
+
+    # 创建一个保存参数的列表
+    param_rows = []
+
     while True:
         # 1. 累积一个序列长度的特征
         print("-" * 30)
@@ -171,6 +182,7 @@ def simulate_inference_loop(model):
                 feature_sequence.append(data['feature'])
                 label_sequence.append(data['label'])
                 print(f"-> Received feature {i+1}/{SEQUENCE_LENGTH}.")
+                print(f"   Current feature sequence shape: {np.array(feature_sequence).shape}")
 
             # 2. 从历史数据池请求对应的原始数据块
             print("\nRequesting raw data chunk from history pool...")
@@ -187,8 +199,6 @@ def simulate_inference_loop(model):
 
             zero_vectors_count = np.sum(np.all(raw_data_array == 0, axis=(1, 2)))
             print(f"全零向量占比: {zero_vectors_count / raw_data_array.shape[0]:.2f}")
-
-
 
             # 3. 准备模型输入
             feature_tensor = torch.tensor(np.array(feature_sequence), dtype=torch.float32).unsqueeze(0) # (1, 4, 6400)
@@ -218,9 +228,27 @@ def simulate_inference_loop(model):
             current_accuracy = (correct_predictions / total_predictions) * 100
             print(f"  - Cumulative Accuracy: {current_accuracy:.2f}% ({correct_predictions}/{total_predictions})")
 
+            # 保存参数到DataFrame
+            param_rows.append({
+                "Zero_Vectors_Ratio": zero_vectors_count / raw_data_array.shape[0],
+                "Probability": prediction_prob,
+                "Result": 1 if is_correct else 0,
+                "True_Label": true_label
+            })
+
             # 6. 清空列表，为下一个序列做准备
             feature_sequence.clear()
             label_sequence.clear()
+
+            if save_counter >= 10:
+                # 追加到CSV文件
+                df = pd.DataFrame(param_rows)
+                df.to_csv("simulate_log.csv", mode='a', header=not pd.io.common.file_exists("simulate_log.csv"), index=False)
+                print("Saved inference parameters to simulate_log.csv")
+                save_counter = 0
+                param_rows.clear()  # 清空已保存的行
+            else:
+                save_counter += 1
 
         except requests.exceptions.RequestException as e:
             print(f"\nAn error occurred while communicating with a service: {e}")

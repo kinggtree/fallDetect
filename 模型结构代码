@@ -3,16 +3,16 @@ graph TD
         direction TB
 
         %% Inputs
-        A[feature_sequence<br>(Low-Frequency Stream)]
-        B[imputed_raw_sequence<br>(High-Frequency Stream)]
+        A["feature_sequence<br/>(Low-Fidelity Stream)"]
+        B["imputed_raw_sequence<br/>(High-Fidelity Stream)"]
 
         %% Processing Blocks
-        LFS[lfs_processor<br>(LSTM)]
-        HFS[hfs_processor<br>(TimeDistributed CNN)]
+        LFS["lfs_processor<br/>(LSTM)"]
+        HFS["hfs_processor<br/>(TimeDistributed Encoder)"]
         CA[CrossAttention]
         CONCAT[Concatenate Features]
-        PFP[post_fusion_processor<br>(LSTM)]
-        CLS[classifier<br>(MLP)]
+        PFP["post_fusion_processor<br/>(LSTM)"]
+        CLS["classifier<br/>(MLP)"]
 
         %% Outputs
         OUT1[logits]

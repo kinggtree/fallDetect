@@ -23,6 +23,7 @@ def load_data():
     try:
         FEATURES = np.load(FEATURES_PATH)
         LABELS = np.load(LABELS_PATH)
+        print(f"Loaded features shape: {FEATURES.shape}, labels shape: {LABELS.shape}.")
     except FileNotFoundError:
         print("ERROR: Feature/Label files not found. Exiting.")
         exit(1)

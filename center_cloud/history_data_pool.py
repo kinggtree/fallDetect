@@ -7,9 +7,8 @@ import threading
 # --- 配置 ---
 HOST = '127.0.0.1'
 PORT = 5001
-RAW_DATA_PATH = ".\\SensorDataSequences.npy"  # 假设您已将变量SensorDataSequences保存为SensorDataSequences.npy
-SPARSITY_RATIO = 0.8     # 大幅稀疏化，例如80%的数据被置零
-# 请求样本数，应与model_runner中的SEQUENCE_LENGTH保持一致
+RAW_DATA_PATH = ".\\SensorDataSequences.npy"
+SPARSITY_RATIO = 0.25
 REQUEST_SAMPLE_COUNT = 8
 
 # --- 全局变量 ---
@@ -38,6 +37,7 @@ def load_and_prepare_data():
         print(f"ERROR: {RAW_DATA_PATH} not found. Exiting.")
         exit(1)
 
+    print(f"Loaded raw data shape: {raw_data.shape}.")
     SPARSE_RAW_DATA = create_sparse_data(raw_data, SPARSITY_RATIO)
     print("History data pool is ready.")
 
