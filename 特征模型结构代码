@@ -1,42 +1,46 @@
 graph TD
-    subgraph Encoder
-        E_Input[输入序列 Source] --> E_LSTM[LSTM Encoder];
-        E_LSTM --> E_State[最终隐藏状态 hidden_cell];
-    end
-
-    subgraph Decoder_Autoregressive_Loop
-        D_Start[初始输入 start] --> D_LSTM_1[LSTM Decoder t=1];
-        D_LSTM_1 --> D_FC_1[Linear Layer t=1];
-        D_FC_1 --> D_Output_1[预测值 Output_1];
-
-        D_Output_1 -- "作为下一步输入" --> D_LSTM_2[LSTM Decoder t=2];
-        D_LSTM_2 --> D_FC_2[Linear Layer t=2];
-        D_FC_2 --> D_Output_2[预测值 Output_2];
+    subgraph "整体流程：自监督训练"
+        direction TB
         
-        D_Output_2 -- "..." --> D_LSTM_n[LSTM Decoder t=n];
-        D_LSTM_n --> D_FC_n[Linear Layer t=n];
-        D_FC_n --> D_Output_n[预测值 Output_n];
-    end
-    
-    subgraph Context_Vector_Transfer
-        E_State -- "初始化解码器状态" --> D_LSTM_1;
-    end
-    
-    subgraph Hidden_State_Flow
-        style D_LSTM_1 fill:#f9f,stroke:#333,stroke-width:2px
-        style D_LSTM_2 fill:#f9f,stroke:#333,stroke-width:2px
-        style D_LSTM_n fill:#f9f,stroke:#333,stroke-width:2px
-        D_LSTM_1 -- "更新状态 h1_c1" --> D_LSTM_2;
-        D_LSTM_2 -- "更新状态 h2_c2" --> D_LSTM_n;
+        subgraph " "
+             Input_Sequence["输入序列<br/>(batch, 200, 11)"]
+        end
+
+        subgraph Encoder [编码器 Encoder]
+            direction TB
+            EncoderLSTM["LSTM 层<br/><i>逐时间步处理序列<br/>压缩信息</i>"]
+            Context["上下文向量 (Context Vector)<br/><i>最终的 Hidden & Cell State</i>"]
+            Input_Sequence --> EncoderLSTM
+            EncoderLSTM --> Context
+        end
+        
+        subgraph " "
+            FeatureVector["<b>我们需要的特征向量</b><br/>(发往服务器)<br/>(batch, hidden_dim)"]
+        end
+
+        Context -- "作为特征提取" --> FeatureVector
+
+        subgraph Decoder [解码器 Decoder]
+            direction TB
+            DecoderLSTM["LSTM 层<br/><i>继承上下文向量作为初始状态</i>"]
+            Loop["<br><i>(自回归循环 100 次)</i>"]
+            FCLayer["全连接层 (Linear)<br/><i>映射到输出维度 (11)</i>"]
+            
+            Context -- "初始化解码器" --> DecoderLSTM
+            DecoderLSTM --> FCLayer
+            FCLayer --> Output_Vector_t["预测的单个时间点<br/>(batch, 1, 11)"]
+            
+            Output_Vector_t -- "收集预测" --> Loop
+            Output_Vector_t -. "作为下一步的输入" .-> DecoderLSTM
+        end
+
+        subgraph " "
+             Output_Sequence["最终预测序列<br/>(batch, 100, 11)"]
+        end
+
+        Loop --> Output_Sequence
     end
 
-    subgraph Teacher_Forcing_Training_only
-        style GroundTruth fill:#ccf,stroke:#333,stroke-width:2px
-        GroundTruth[真实目标 Target_t]
-        GroundTruth -.->|"以一定概率替代"| D_LSTM_2
-    end
-    
-    D_Output_n --> Final_Output[最终输出序列];
-
-    style Encoder fill:#bbf,stroke:#333,stroke-width:4px
-    style Decoder_Autoregressive_Loop fill:#bfb,stroke:#333,stroke-width:4px
+    style Encoder fill:#D6EAF8,stroke:#5DADE2
+    style Decoder fill:#D5F5E3,stroke:#58D68D
+    style FeatureVector fill:#FCF3CF,stroke:#F4D03F,stroke-width:2px

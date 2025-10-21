@@ -12,7 +12,9 @@ simulated_features/
 
 precomputed_dataset/
 
-autoregression_feature_extractor_model.pt
+*.pt
+
+*.save
 
 autoregression_processed_data/
 
