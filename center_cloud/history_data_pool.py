@@ -10,17 +10,18 @@ HOST = '127.0.0.1'
 PORT = 5001
 CONTROL_PORT = 5005  # 新增：控制端口
 RAW_DATA_PATH = ".\\SensorDataSequences.npy"
+SCALER_PATH = "autoregression_timeseries_data_scaler.save"
 REQUEST_SAMPLE_COUNT = 4    # 发送 (x, 200, 11) 数据块时的样本数量，与模型训练时保持一致
 
 # --- 全局变量 ---
-RAW_DATA = None
+SCALED_RAW_DATA = None
 DATA_ITEM_SHAPE = None  # 用于存储单个数据项的形状，例如 (200, 11)
 CURRENT_INDEX = 0
 SEND_REAL_DATA = True   # 新增：控制标志，默认为发送真实数据
 data_lock = threading.Lock() # 确保线程安全
 
 def load_and_prepare_data():
-    global RAW_DATA, DATA_ITEM_SHAPE
+    global SCALED_RAW_DATA, DATA_ITEM_SHAPE
     print(f"Loading raw data from {RAW_DATA_PATH}...")
     try:
         raw_data = np.load(RAW_DATA_PATH)
@@ -33,10 +34,21 @@ def load_and_prepare_data():
         exit(1)
 
     print(f"Loaded raw data shape: {raw_data.shape}.")
-    RAW_DATA = raw_data.copy()
+
+    # 归一化处理
+    print("\nApplying scaler to raw sensor data sequences...")
+    scaler = joblib.load(SCALER_PATH)
+
+    scaled_raw_data = []
+    for i in range(raw_data.shape[0]):
+        scaled_sequence = scaler.transform(raw_data[i])
+        scaled_raw_data.append(scaled_sequence)
+
+    SCALED_RAW_DATA = np.array(scaled_raw_data)
+
+    print("Finished applying scaler to raw sensor data sequences.")
     
     # 存储单个数据项的形状 (例如: (200, 11))
-    # 假设 raw_data 的形状是 (N, 200, 11)
     DATA_ITEM_SHAPE = raw_data.shape[1:]
     print(f"Data item shape set to: {DATA_ITEM_SHAPE}")
     print("History data pool is ready.")
@@ -49,13 +61,13 @@ def get_raw_data_chunk():
     global CURRENT_INDEX, SEND_REAL_DATA
     with data_lock:
         chunk_size = REQUEST_SAMPLE_COUNT
-        if CURRENT_INDEX + chunk_size > len(RAW_DATA):
+        if CURRENT_INDEX + chunk_size > len(SCALED_RAW_DATA):
             return jsonify({"error": "End of data"}), 404
 
         # 根据 SEND_REAL_DATA 标志决定发送什么
         if SEND_REAL_DATA:
             # 提取真实数据块
-            data_chunk = RAW_DATA[CURRENT_INDEX : CURRENT_INDEX + chunk_size]
+            data_chunk = SCALED_RAW_DATA[CURRENT_INDEX : CURRENT_INDEX + chunk_size]
             print(f"Serving REAL data chunk: indices {CURRENT_INDEX} to {CURRENT_INDEX + chunk_size - 1}")
         else:
             # 创建一个全零的数据块
