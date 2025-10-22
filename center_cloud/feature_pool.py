@@ -15,6 +15,7 @@ FEATURES = None
 LABELS = None
 CURRENT_INDEX = 0
 data_lock = threading.Lock()
+reset_timer = None # 用于跟踪重置定时器
 
 def load_data():
     """加载特征和标签"""
@@ -30,14 +31,29 @@ def load_data():
 
     print("Feature pool is ready.")
 
+# --- 重置索引的回调函数 ---
+def reset_current_index():
+    """因超时而重置 CURRENT_INDEX"""
+    global CURRENT_INDEX
+    with data_lock:
+        # 检查索引是否已经为0，避免重复打印消息
+        if CURRENT_INDEX != 0:
+            CURRENT_INDEX = 0
+            # 在打印前后添加换行符，使其在服务器日志中更显眼
+            print("\n--- 5 seconds of inactivity. Resetting CURRENT_INDEX to 0. ---\n")
+
 
 # --- Flask 应用 ---
 app = Flask(__name__)
 
 @app.route('/get_feature', methods=['GET'])
 def get_feature():
-    global CURRENT_INDEX
+    global CURRENT_INDEX, reset_timer
     with data_lock:
+        # --- 取消上一个定时器 ---
+        if reset_timer is not None:
+            reset_timer.cancel()
+        
         if CURRENT_INDEX >= len(FEATURES):
             return jsonify({"error": "End of data"}), 404
 
@@ -53,6 +69,10 @@ def get_feature():
             "feature": feature.tolist(),
             "label": int(label) # 确保标签是标准的int类型
         }
+
+        # --- 启动一个新的5秒定时器 ---
+        reset_timer = threading.Timer(5.0, reset_current_index)
+        reset_timer.start()
     return jsonify(response)
 
 if __name__ == '__main__':

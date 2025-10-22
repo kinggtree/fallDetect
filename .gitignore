@@ -23,3 +23,5 @@ extracted_features/
 scatter_plot.png
 
 simulate_results.csv
+
+simulate_log_dqn.csv

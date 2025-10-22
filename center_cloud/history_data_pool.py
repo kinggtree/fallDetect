@@ -17,7 +17,8 @@ REQUEST_SAMPLE_COUNT = 4    # 发送 (x, 200, 11) 数据块时的样本数量，
 SCALED_RAW_DATA = None
 DATA_ITEM_SHAPE = None  # 用于存储单个数据项的形状，例如 (200, 11)
 CURRENT_INDEX = 0
-SEND_REAL_DATA = True   # 新增：控制标志，默认为发送真实数据
+SEND_REAL_DATA = True   # 控制标志，默认为发送真实数据
+reset_timer = None # 用于跟踪重置定时器
 data_lock = threading.Lock() # 确保线程安全
 
 def load_and_prepare_data():
@@ -53,13 +54,30 @@ def load_and_prepare_data():
     print(f"Data item shape set to: {DATA_ITEM_SHAPE}")
     print("History data pool is ready.")
 
+
+# --- 重置索引的回调函数 ---
+def reset_current_index():
+    """因超时而重置 CURRENT_INDEX"""
+    global CURRENT_INDEX
+    with data_lock:
+        # 检查索引是否已经为0，避免重复打印消息
+        if CURRENT_INDEX != 0:
+            CURRENT_INDEX = 0
+            # 在打印前后添加换行符，使其在服务器日志中更显眼
+            print("\n--- 5 seconds of inactivity. Resetting CURRENT_INDEX to 0. ---\n")
+
+
 # --- Flask 应用 1 (数据端口) ---
 app_data = Flask(__name__)
 
 @app_data.route('/get_raw_data_chunk', methods=['GET'])
 def get_raw_data_chunk():
-    global CURRENT_INDEX, SEND_REAL_DATA
+    global CURRENT_INDEX, SEND_REAL_DATA, reset_timer
     with data_lock:
+        # --- 取消上一个定时器 ---
+        if reset_timer is not None:
+            reset_timer.cancel()
+        
         chunk_size = REQUEST_SAMPLE_COUNT
         if CURRENT_INDEX + chunk_size > len(SCALED_RAW_DATA):
             return jsonify({"error": "End of data"}), 404
@@ -83,6 +101,9 @@ def get_raw_data_chunk():
         response = {
             "data_chunk": data_chunk.tolist()
         }
+        # --- 启动一个新的5秒定时器 ---
+        reset_timer = threading.Timer(5.0, reset_current_index)
+        reset_timer.start()
     return jsonify(response)
 
 # --- Flask 应用 2 (控制端口) ---
