@@ -12,20 +12,17 @@ import random
 from collections import deque
 from feature_model_definition import ContextualFidelityModel
 
-import subprocess  # 用于启动子进程
-import sys         # 用于获取python解释器路径
-import atexit      # 作为一种备用关闭方案
 
 # --- 配置 ---
 HISTORY_DATA_POOL_URL = "http://127.0.0.1:5001/get_raw_data_chunk"
 FEATURE_POOL_URL = "http://127.0.0.1:5002/get_feature"
-INSTRUCTION_URL = "http://127.0.0.1:5005/set_instruction" # 新增: 控制DQN的动作
+INSTRUCTION_URL = "http://127.0.0.1:5005/set_instruction" # 控制DQN的动作
 MODEL_PATH = ".\\contextual_fidelity_model_pretrained_encoder.pth"
 REQUEST_INTERVAL_SECONDS = 0.05 # 每 x 秒请求一次特征
 SEQUENCE_LENGTH = 4             # 累积 x 个 (REQUEST_SAMPLE_COUNT, 200, 11) 特征后进行一次推理
 
 # --- DQN 超参数 ---
-STATE_DIM = 256           # 状态维度 (来自 LSTM_HIDDEN_DIM)
+STATE_DIM = 256           # 状态维度 (来自保真模型 LSTM_HIDDEN_DIM)
 ACTION_DIM = 2            # 动作维度 (0: 发送零向量, 1: 发送真实数据)
 REPLAY_BUFFER_SIZE = 10000
 BATCH_SIZE = 32
@@ -243,8 +240,8 @@ def simulate_training_loop(model, agent):
             feature_tensor = torch.tensor(np.array(feature_sequence), dtype=torch.float32).unsqueeze(0)
             raw_data_tensor = torch.tensor(raw_data_array, dtype=torch.float32).unsqueeze(0)
             
-            # 5. (Runner) 观察 r_t 和 s_{t+1}
-            print("  - Running RL model inference...")
+            # 5. (Fidelity Model Runner) 观察 r_t 和 s_{t+1}
+            print("  - Running Fidelity model inference...")
             logits = None
             next_state = None
             
@@ -257,7 +254,6 @@ def simulate_training_loop(model, agent):
             prediction = 1 if prediction_prob > 0.5 else 0
             
             # 6. (DQN) 定义奖励 (Reward Shaping)
-            # 必须在存储到 buffer 之前定义
             true_label = label_sequence[-1]
             reward = 1.0 if prediction == true_label else -1.0
             
@@ -336,84 +332,5 @@ if __name__ == '__main__':
     
     # 3. 启动主训练循环
     simulate_training_loop(context_model, dqn_agent)
-
-
-# 一键启动版本（有问题，暂时弃用）
-# if __name__ == '__main__':
-    
-#     # --- 1. 定义子进程脚本路径 ---
-#     FEATURE_POOL_SCRIPT = 'center_cloud\\feature_pool.py'
-#     HISTORY_DATA_POOL_SCRIPT = 'center_cloud\\history_data_pool.py'
-    
-#     # 获取当前Python解释器的路径
-#     # 这确保了子进程使用与主进程相同的Python环境
-#     python_executable = sys.executable 
-    
-#     process_feature_pool = None
-#     process_history_pool = None
-    
-#     try:
-#         # --- 2. 启动子进程 ---
-#         # Popen 是非阻塞的
-#         print(f"Starting {FEATURE_POOL_SCRIPT} in background...")
-#         process_feature_pool = subprocess.Popen(
-#             [python_executable, FEATURE_POOL_SCRIPT],
-#             stdout=subprocess.PIPE, # 捕捉标准输出
-#             stderr=subprocess.PIPE  # 捕捉标准错误
-#         )
-        
-#         print(f"Starting {HISTORY_DATA_POOL_SCRIPT} in background...")
-#         process_history_pool = subprocess.Popen(
-#             [python_executable, HISTORY_DATA_POOL_SCRIPT],
-#             stdout=subprocess.PIPE,
-#             stderr=subprocess.PIPE
-#         )
-        
-#         # --- 3. 等待服务器启动 ---
-#         print("Waiting 3 seconds for servers to initialize...")
-#         time.sleep(3)
-        
-#         # 检查子进程是否在启动时就失败了
-#         if process_feature_pool.poll() is not None:
-#             raise RuntimeError(f"{FEATURE_POOL_SCRIPT} failed to start. Error:\n{process_feature_pool.stderr.read().decode()}")
-        
-#         if process_history_pool.poll() is not None:
-#             raise RuntimeError(f"{HISTORY_DATA_POOL_SCRIPT} failed to start. Error:\n{process_history_pool.stderr.read().decode()}")
-
-#         print("All servers started successfully.")
-
-#         # --- 4. 运行主逻辑 ---
-        
-#         # 1. 加载预训练的 ContextualFidelityModel
-#         context_model = load_model(MODEL_PATH)
-        
-#         # 2. 初始化DQN Agent
-#         dqn_agent = DQNAgent(state_dim=STATE_DIM, action_dim=ACTION_DIM)
-        
-#         # 3. 启动主训练循环
-#         simulate_training_loop(context_model, dqn_agent)
-        
-#     except KeyboardInterrupt:
-#         print("\nMain loop interrupted by user (Ctrl+C). Shutting down...")
-        
-#     except Exception as e:
-#         print(f"\nAn unexpected error occurred in the main loop: {e}")
-        
-#     finally:
-#         # --- 5. 终止子进程 ---
-#         print("\nShutting down subprocesses...")
-#         if process_history_pool:
-#             print(f"Terminating {HISTORY_DATA_POOL_SCRIPT} (PID: {process_history_pool.pid})...")
-#             process_history_pool.terminate()
-#             process_history_pool.wait()
-#             print("History pool terminated.")
-
-#         if process_feature_pool:
-#             print(f"Terminating {FEATURE_POOL_SCRIPT} (PID: {process_feature_pool.pid})...")
-#             process_feature_pool.terminate()
-#             process_feature_pool.wait()
-#             print("Feature pool terminated.")
-            
-#         print("All processes shut down.")
 
 

@@ -8,7 +8,7 @@ import joblib
 # --- 配置 ---
 HOST = '127.0.0.1'
 PORT = 5001
-CONTROL_PORT = 5005  # 新增：控制端口
+CONTROL_PORT = 5005  # 控制端口
 RAW_DATA_PATH = ".\\SensorDataSequences.npy"
 SCALER_PATH = "autoregression_timeseries_data_scaler.save"
 REQUEST_SAMPLE_COUNT = 4    # 发送 (x, 200, 11) 数据块时的样本数量，与模型训练时保持一致
