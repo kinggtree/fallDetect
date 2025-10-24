@@ -12,6 +12,8 @@ import random
 from collections import deque
 from feature_model_definition import ContextualFidelityModel
 
+import os
+from torch.utils.tensorboard import SummaryWriter
 
 # --- 配置 ---
 HISTORY_DATA_POOL_URL = "http://127.0.0.1:5001/get_raw_data_chunk"
@@ -28,7 +30,7 @@ REPLAY_BUFFER_SIZE = 10000
 BATCH_SIZE = 32
 GAMMA = 0.99              # 折扣因子
 LEARNING_RATE = 1e-4
-TARGET_UPDATE_FREQ = 10   # 每10步更新一次目标网络
+TARGET_UPDATE_FREQ = 200   # 每10步更新一次目标网络 (不必太频繁地更新目标网络)
 
 # ===================================================================
 # --- DQN 定义 ---
@@ -44,30 +46,31 @@ class QNetwork(nn.Module):
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        return self.fc3(x)  # ? why no ReLU
 
 class ReplayBuffer:
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
 
-    def push(self, state, action, reward, next_state):
-        self.buffer.append((state, action, reward, next_state))
+    def push(self, state, action, reward, next_state, done):  # episode 终止时, done = 1, 否则 done = 0
+        self.buffer.append((state, action, reward, next_state, done))
 
     def sample(self, batch_size):
-        states, actions, rewards, next_states = zip(*random.sample(self.buffer, batch_size))
+        states, actions, rewards, next_states, dones = zip(*random.sample(self.buffer, batch_size))
         
-        states = torch.cat(states)
+        states = torch.cat(states)  # ?
         actions = torch.tensor(actions, dtype=torch.int64).unsqueeze(1)
         rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
         next_states = torch.cat(next_states)
+        dones = torch.tensor(dones, dtype=torch.int64).unsqueeze(1)
         
-        return states, actions, rewards, next_states
+        return states, actions, rewards, next_states, dones
 
     def __len__(self):
         return len(self.buffer)
 
 class DQNAgent:
-    def __init__(self, state_dim, action_dim):
+    def __init__(self, state_dim, action_dim, is_test: bool = False, is_tb: bool = False):
         self.state_dim = state_dim
         self.action_dim = action_dim
 
@@ -78,34 +81,83 @@ class DQNAgent:
 
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LEARNING_RATE)
         self.replay_buffer = ReplayBuffer(REPLAY_BUFFER_SIZE)
-        self.loss_fn = nn.MSELoss()
+        self.loss_fn = nn.SmoothL1Loss()
+        
+        # training or testing
+        self.is_test = is_test
+        # epsilon-greedy related hyper-params
+        self.epsilon = 1.0
+        self.epsilon_decay_cnt = 10000  # number of updates required to decay to the minimum
+        self.max_epsilon = 1.0
+        self.min_epsilon = 0.05
+        # log related
+        self.update_cnt = 0
+        self.writer_wnd = 100
+        self.train_fidelities, self.train_rewards = deque(maxlen=self.writer_wnd), deque(maxlen=self.writer_wnd)
+        self.is_tb = is_tb
+        tb_path = "logs/tb"
+        if is_tb:
+            os.makedirs(tb_path, exist_ok=True)
+            self.writer = SummaryWriter(tb_path)
 
     def select_action(self, state_tensor):
         """
         简化：以50%的概率输出1（同步/真实数据），50%的概率输出0（不同步/全零）
         """
-        if random.random() > 0.5:
-            action = 1 # 发送真实数据
-        else:
-            action = 0 # 发送全零向量
-        return action
+        # if random.random() > 0.5:
+        #     action = 1 # 发送真实数据
+        # else:
+        #     action = 0 # 发送全零向量
+        # return action
+
+        if self.is_test:  # greedy selection
+            action = self.policy_net(state_tensor).argmax().detach().item()
+            return action
+        else:  # epsilon-greedy selection
+            if self.epsilon > np.random.random():
+                action = random.randint(0, ACTION_DIM - 1)
+            else:
+                action = self.policy_net(state_tensor).argmax().detach().item()
+            return action
 
     def learn(self):
         """从经验回放池中采样并训练网络"""
         if len(self.replay_buffer) < BATCH_SIZE:
             return None # 缓冲区中数据不够
 
-        states, actions, rewards, next_states = self.replay_buffer.sample(BATCH_SIZE)
+        states, actions, rewards, next_states, dones = self.replay_buffer.sample(BATCH_SIZE)
 
         q_predicted = self.policy_net(states).gather(1, actions)
         q_next = self.target_net(next_states).max(1)[0].detach().unsqueeze(1)
-        q_target = rewards + (GAMMA * q_next)
+        q_target = rewards + (1 - dones) * GAMMA * q_next  # 终止状态时不再考虑未来的 Q 值
 
         loss = self.loss_fn(q_predicted, q_target)
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+        self.update_cnt += 1
+
+        if self.update_cnt % 100 == 0:
+            r = sum(self.train_rewards) / len(self.train_rewards)
+            f = sum(self.train_fidelities) / len(self.train_fidelities)
+            # print("R {:4f} || F {:4f}".format(r, f))
+            if self.is_tb:
+                self.writer.add_scalar("measure/reward", r, self.update_cnt)
+                self.writer.add_scalar("measure/accuracy", f, self.update_cnt)
+                # self.writer.add_scalar("measure/epsilon", self.epsilon, self.update_cnt)
+                # self.writer.add_scalar("measure/loss", loss, self.update_cnt)
+
+        # linearly decrease epsilon
+        self.epsilon = max(
+            self.min_epsilon, 
+            self.epsilon - (self.max_epsilon - self.min_epsilon) / self.epsilon_decay_cnt
+        )
+
+        # update the target_net
+        if self.update_cnt % TARGET_UPDATE_FREQ == 0:
+            self.update_target_network()
         
         return loss.item()
 
@@ -113,6 +165,17 @@ class DQNAgent:
         """将 policy_net 的权重复制到 target_net"""
         self.target_net.load_state_dict(self.policy_net.state_dict())
         print("\n*** Target network updated ***\n")
+
+    def save_model(self, filename):
+        torch.save({
+            'model_state_dict': self.policy_net.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+        }, filename)
+
+    def load_model(self, filename):
+        ckp_states = torch.load(filename)
+        self.policy_net.load_state_dict(ckp_states["model_state_dict"])
+        self.optimizer.load_state_dict(ckp_states["optimizer_state_dict"])
 
 
 # --- HTTP 辅助函数 ---
@@ -154,7 +217,7 @@ def load_model(model_path):
 
 
 # --- 主模拟/训练循环 ---
-def simulate_training_loop(model, agent):
+def simulate_training_loop(model, agent: DQNAgent):
     """主模拟与DQN训练循环"""
     
     feature_sequence = []
@@ -255,10 +318,17 @@ def simulate_training_loop(model, agent):
             
             # 6. (DQN) 定义奖励 (Reward Shaping)
             true_label = label_sequence[-1]
-            reward = 1.0 if prediction == true_label else -1.0
+            reward = 1.0 if prediction == true_label else true_label_prediction_prob - 1
+
+            agent.train_rewards.append(reward)
+            if prediction == true_label:
+                agent.train_fidelities.append(1)
+            else:
+                agent.train_fidelities.append(0)
             
-            # 7. (DQN) 存储 (s_t, a_t, r_t, s_{t+1})
-            agent.replay_buffer.push(current_state, action, reward, next_state)
+            # 7. (DQN) 存储 (s_t, a_t, r_t, s_{t+1}, done)
+            done = 1 if terminated else 0
+            agent.replay_buffer.push(current_state, action, reward, next_state, done)
             
             # 8. (DQN) 更新 s_t = s_{t+1}
             current_state = next_state
@@ -268,9 +338,9 @@ def simulate_training_loop(model, agent):
             if loss is not None:
                 print(f"  - DQN Training Loss: {loss:.6f}")
 
-            # 9. (DQN) 更新目标网络
-            if step % TARGET_UPDATE_FREQ == 0:
-                agent.update_target_network()
+            # # 9. (DQN) 更新目标网络
+            # if step % TARGET_UPDATE_FREQ == 0:
+            #     agent.update_target_network()
 
             # 10. (Runner) 日志记录
            # 10. (Runner) 日志记录
@@ -328,7 +398,7 @@ if __name__ == '__main__':
     context_model = load_model(MODEL_PATH)
     
     # 2. 初始化DQN Agent
-    dqn_agent = DQNAgent(state_dim=STATE_DIM, action_dim=ACTION_DIM)
+    dqn_agent = DQNAgent(state_dim=STATE_DIM, action_dim=ACTION_DIM, is_test=False, is_tb=True)
     
     # 3. 启动主训练循环
     simulate_training_loop(context_model, dqn_agent)
