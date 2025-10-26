@@ -290,13 +290,10 @@ def simulate_training_loop(model, agent: DQNAgent):
     while True:
         step += 1
         if is_print:
-            print("-" * 30)
-            print(f"Step {step}")
+            print(f"Current Step: {step}")
 
         # 1. (DQN) 根据当前状态 s_t 选择动作 a_t
         action = agent.select_action(current_state)
-        if is_print:
-            print(f"  - Selected Action: {action}")
 
         actions_list.append(action)
 
@@ -332,8 +329,6 @@ def simulate_training_loop(model, agent: DQNAgent):
         raw_data_tensor = torch.tensor(np.array(history_data_sequence[position_index-4:position_index]), dtype=torch.float32).unsqueeze(0)
 
         # 5. (Fidelity Model Runner) 观察 r_t 和 s_{t+1}
-        if is_print:
-            print("  - Running Fidelity model inference...")
         logits = None
         next_state = None
         
@@ -383,8 +378,6 @@ def simulate_training_loop(model, agent: DQNAgent):
         
         # 8. (DQN) 训练
         loss = agent.learn()
-        if loss is not None and is_print:
-            print(f"  - DQN Training Loss: {loss:.6f}")
 
         # # 9. (DQN) 更新目标网络
         # if step % TARGET_UPDATE_FREQ == 0:
@@ -410,26 +403,24 @@ def simulate_training_loop(model, agent: DQNAgent):
         # label_sequence.clear()
         # history_data_sequence.clear()
 
-        # 12. (Runner) 统计过去100次预测情况
-        if save_counter >= 100:
-            current_seq = np.array(history_data_sequence[position_index-4:position_index])
+        # 12. (Runner) 统计过去 100 次预测情况
+        statistic_length = 100
+        if save_counter >= statistic_length:
+            current_seq = np.array(history_data_sequence[position_index-statistic_length:position_index])
             zero_vectors_count = np.sum(np.all(current_seq == 0, axis=(1, 2)))
             # 统计action1分布 (保留两位小数)
-            action1_temp_list = actions_list[position_index-100:position_index]
+            action1_temp_list = actions_list[position_index-statistic_length:position_index]
             action1_ratio = sum(a == 1 for a in action1_temp_list) / len(action1_temp_list) if action1_temp_list else 0
             param_rows.append({
-                "Zero_Vectors_Ratio": zero_vectors_count / SEQUENCE_LENGTH,
-                "Probability": reward,
-                "DQN Action": action,
+                "Current_Step": position_index,
                 "DQN Loss": loss if loss is not None else -1,
+                "Zero_Vectors_Ratio": '{:.2f}'.format(zero_vectors_count / statistic_length),
                 "Cumulative_Accuracy": current_accuracy,
                 "Action_1_Ratio": '{:.2f}'.format(action1_ratio)
             })
             df = pd.DataFrame(param_rows)
             # 保存带时间戳的文件
             df.to_csv(LOG_PATH, mode='a', header=not pd.io.common.file_exists(LOG_PATH), index=False)
-            if is_print:
-                print(f"Saved inference parameters to {LOG_PATH}")
             save_counter = 0
             param_rows.clear()
             is_print = True
