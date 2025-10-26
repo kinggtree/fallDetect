@@ -24,4 +24,8 @@ scatter_plot.png
 
 simulate_results.csv
 
-simulate_log_dqn.csv
+model_runner_dqn_log_*.csv
+
+logs/
+
+training_curves.png

@@ -43,6 +43,41 @@ def reset_current_index():
             print("\n--- 5 seconds of inactivity. Resetting CURRENT_INDEX to 0. ---\n")
 
 
+# ===================================================================
+# --- 新增：用于 model_runner 直接调用的函数 ---
+# ===================================================================
+def get_feature_direct():
+    """
+    直接获取特征和标签，模拟 Flask 路由的逻辑。
+    返回: (response_dict, status_code)
+    """
+
+    global CURRENT_INDEX
+    with data_lock:
+        
+        if CURRENT_INDEX >= len(FEATURES):
+            # 模拟 404 Not Found
+            return ({"error": "End of data"}, 404)
+
+        feature = FEATURES[CURRENT_INDEX]
+        label = LABELS[CURRENT_INDEX]
+        
+        # print(f"Serving feature and label for index {CURRENT_INDEX}")
+
+        # 更新索引
+        CURRENT_INDEX += 1
+
+        response = {
+            "feature": feature.tolist(),
+            "label": int(label) # 确保标签是标准的int类型
+        }
+
+    # 模拟 200 OK
+    return (response, 200)
+
+
+
+
 # --- Flask 应用 ---
 app = Flask(__name__)
 

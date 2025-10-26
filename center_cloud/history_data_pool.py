@@ -106,6 +106,75 @@ def get_raw_data_chunk():
         reset_timer.start()
     return jsonify(response)
 
+
+
+# ===================================================================
+# --- 新增：用于 model_runner 直接调用的函数 ---
+# ===================================================================
+
+def get_raw_data_chunk_direct():
+    """
+    直接获取原始数据块，模拟 Flask 路由的逻辑。
+    返回: (response_dict, status_code)
+    """
+    global CURRENT_INDEX, SEND_REAL_DATA
+    with data_lock:
+        
+        chunk_size = REQUEST_SAMPLE_COUNT
+        if CURRENT_INDEX + chunk_size > len(SCALED_RAW_DATA):
+            # 模拟 404 Not Found
+            return ({"error": "End of data"}, 404)
+
+        # 根据 SEND_REAL_DATA 标志决定发送什么
+        if SEND_REAL_DATA:
+            # 提取真实数据块
+            data_chunk = SCALED_RAW_DATA[CURRENT_INDEX : CURRENT_INDEX + chunk_size]
+            # print(f"Serving REAL data chunk: indices {CURRENT_INDEX} to {CURRENT_INDEX + chunk_size - 1}")
+        else:
+            # 创建一个全零的数据块
+            zero_shape = (chunk_size,) + DATA_ITEM_SHAPE
+            data_chunk = np.zeros(zero_shape)
+            # print(f"Serving ZERO data chunk: indices {CURRENT_INDEX} to {CURRENT_INDEX + chunk_size - 1}")
+
+        # 无论发送什么，索引都照常更新
+        CURRENT_INDEX += chunk_size
+        
+        response = {
+            "data_chunk": data_chunk.tolist()
+        }
+    
+    # 模拟 200 OK
+    return (response, 200)
+
+def set_instruction_direct(instruction):
+    """
+    直接设置指令，模拟 Flask 路由的逻辑。
+    返回: (response_dict, status_code)
+    """
+    global SEND_REAL_DATA
+    try:
+        with data_lock:
+            if instruction == 1 or instruction is True:
+                SEND_REAL_DATA = True
+                message = "Instruction set to: SEND REAL DATA"
+            elif instruction == 0 or instruction is False:
+                SEND_REAL_DATA = False
+                message = "Instruction set to: SEND ZERO DATA"
+            else:
+                # 模拟 400 Bad Request
+                return ({"error": "Invalid instruction. Send 1 (true) or 0 (false)."}, 400)
+        
+        # print(message) # 在服务器日志中打印状态
+        # 模拟 200 OK
+        return ({"status": "success", "message": message}, 200)
+
+    except Exception as e:
+        # 模拟 400 Bad Request (或 500 Internal Server Error)
+        return ({"error": str(e)}, 400)
+
+
+
+
 # --- Flask 应用 2 (控制端口) ---
 app_control = Flask(__name__)
 
