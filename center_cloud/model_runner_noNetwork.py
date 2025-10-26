@@ -20,13 +20,15 @@ from feature_pool import load_data as load_feature_data, get_feature_direct
 from history_data_pool import load_and_prepare_data as load_history_data, get_raw_data_chunk_direct, set_instruction_direct
 # ---------------------------------
 
+timestamp = time.strftime("%Y%m%d_%H%M%S")
+
 # --- (移除) 网络配置 ---
 # HISTORY_DATA_POOL_URL = "http://127.0.0.1:5001/get_raw_data_chunk"
 # FEATURE_POOL_URL = "http://127.0.0.1:5002/get_feature"
 # INSTRUCTION_URL = "http://127.0.0.1:5005/set_instruction" # 控制DQN的动作
 # ---------------------------------
 MODEL_PATH = ".\\contextual_fidelity_model_pretrained_encoder.pth"
-LOG_PATH = f"model_runner_dqn_log_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+LOG_PATH = f"model_runner_dqn_log_{timestamp}.csv"
 REQUEST_INTERVAL_SECONDS = 0.05 # 每 x 秒请求一次特征
 SEQUENCE_LENGTH = 4             # 累积 x 个 (REQUEST_SAMPLE_COUNT, 200, 11) 特征后进行一次推理
 
@@ -38,11 +40,13 @@ BATCH_SIZE = 32
 GAMMA = 0.99              # 折扣因子
 LEARNING_RATE = 1e-4
 TARGET_UPDATE_FREQ = 200   # 每 x 步更新一次目标网络 (不必太频繁地更新目标网络)
-COST_PENALTY = 0.1        # 新增：每次选择 action=1 (同步) 时的惩罚值
+COST_PENALTY = 0.5        # 新增：每次选择 action=1 (同步) 时的惩罚值
 
 # ===================================================================
 # --- DQN 定义 ---
 # ===================================================================
+
+
 
 class QNetwork(nn.Module):
     def __init__(self, state_dim, action_dim):
@@ -103,7 +107,7 @@ class DQNAgent:
         self.writer_wnd = 100
         self.train_fidelities, self.train_rewards = deque(maxlen=self.writer_wnd), deque(maxlen=self.writer_wnd)
         self.is_tb = is_tb
-        tb_path = "logs/tb"
+        tb_path = f"logs/tb/run_{timestamp}"
         if is_tb:
             os.makedirs(tb_path, exist_ok=True)
             self.writer = SummaryWriter(tb_path)
@@ -237,6 +241,7 @@ def simulate_training_loop(model, agent: DQNAgent):
     correct_predictions = 0
     save_counter = 0
     param_rows = []
+    actions_list = []
 
     # --- 获取初始状态 (s_0) ---
     print("Getting initial state (s_0)...")
@@ -283,6 +288,8 @@ def simulate_training_loop(model, agent: DQNAgent):
         action = agent.select_action(current_state)
         if is_print:
             print(f"  - Selected Action: {action}")
+
+        actions_list.append(action)
 
         # 2. (HTTP) 执行动作 a_t (发送指示)
         send_action(action)
@@ -399,10 +406,10 @@ def simulate_training_loop(model, agent: DQNAgent):
         label_sequence.clear()
 
         # 12. (Runner) 统计预测情况
-        
-
-        if save_counter >= 100:
+        if save_counter >= 75:
             zero_vectors_count = np.sum(np.all(raw_data_array == 0, axis=(1, 2)))
+            # 统计action1分布 (保留两位小数)
+            action1_ratio = sum(a == 1 for a in actions_list) / len(actions_list) if actions_list else 0
             param_rows.append({
                 "Zero_Vectors_Ratio": zero_vectors_count / raw_data_array.shape[0],
                 "Probability": reward,
@@ -411,7 +418,8 @@ def simulate_training_loop(model, agent: DQNAgent):
                 "Result": 1 if is_correct else 0,
                 "DQN Action": action,
                 "Cumulative_Accuracy": current_accuracy,
-                "DQN Loss": loss if loss is not None else -1
+                "DQN Loss": loss if loss is not None else -1,
+                "Action_1_Ratio": '{:.2f}'.format(action1_ratio)
             })
             df = pd.DataFrame(param_rows)
             # 保存带时间戳的文件

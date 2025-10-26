@@ -62,7 +62,7 @@ def get_feature_direct():
         feature = FEATURES[CURRENT_INDEX]
         label = LABELS[CURRENT_INDEX]
         
-        # print(f"Serving feature and label for index {CURRENT_INDEX}")
+        print(f"Serving feature and label for index {CURRENT_INDEX}")
 
         # 更新索引
         CURRENT_INDEX += 1

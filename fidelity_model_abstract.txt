@@ -1,0 +1,61 @@
+1. 摘要 (Abstract)
+    任务类型： 监督学习 - 二分类。
+    目标： 区分“跌倒”与“日常生活活动”(ADL)。
+    模型类型： ContextualFidelityModel。
+    核心架构： 双流（Dual-Stream）LSTM 融合模型，使用交叉注意力（Cross-Attention）机制。
+    目的： 该模型通过融合两个不同“保真度”的数据流来进行准确的跌倒检测。
+        高保真流 (HFS)： 使用第1阶段预训练的 Encoder (autoregression_feature_extractor_model.pt) 来提取原始传感器数据窗口的深度特征。
+        低保真流 (LFS)： 处理一个已提取的特征序列（来自 特征模型）。
+    数据源： MobiFall 数据集。
+
+2. 模型输入 (Input)
+该模型是一个序列的序列模型，它处理由4个时间窗口组成的序列。
+    SEQUENCE_LENGTH： 4 (即模型一次观察 4 个窗口)。
+    STRIDE： 2 (每隔 2 个窗口创建一个新序列)。
+    模型 forward 函数接收两个输入：
+        输入1 (LFS): feature_sequence
+        内容： 低保真流的特征序列（从 特征模型 获取）。
+        维度： (Batch_Size, 4, 64)
+            4: 序列长度 (SEQUENCE_LENGTH)。
+            64: LFS 特征维度 (LFS_FEATURE_DIM)。
+    输入2 (HFS): imputed_raw_sequence
+        内容： 高保真流的原始数据序列。
+        维度： (Batch_Size, 4, 200, 11)
+            4: 序列长度 (SEQUENCE_LENGTH)。
+            200: 每个窗口的时间点 (50Hz * 4s)。
+            11: 原始传感器特征维度。
+        预处理： 使用第1阶段保存的 StandardScaler 进行标准化。
+
+3. 模型输出 (Output)
+    内容： 二分类的 Logits 值，表示该序列是否为“跌倒”。
+    维度： (Batch_Size, 1)
+    Ground Truth (真实标签)：
+        标签生成： label = np.max(label_slice)。
+        逻辑： 在一个长度为 4 的窗口序列中，只要有任意一个窗口的标签为 1 (跌倒)，整个序列的标签即为 1。
+
+4. 训练过程 (Training Process)
+    数据预处理：
+        加载从特征模型提取的 all_features.npy (LFS) 并生成 SensorDataSequences.npy (HFS)
+        使用 joblib.load(SCALER_PATH) 加载的 scaler 标准化 HFS 数据。
+        使用 ContextualFidelityDataset 按 sequence_length=4 和 stride=2 构建序列。
+    模型架构超参数：
+        LFS_FEATURE_DIM: 64
+        HFS_FEATURE_DIM: 64 (由预训练的 Encoder 定义)
+        LSTM_HIDDEN_DIM: 256 (用于 LFS 流的 LSTM 和后融合 LSTM)
+        NUM_CLASSES: 1
+    训练超参数：
+        数据集划分： 训练集 (3083), 验证集 (712), 测试集 (949)。
+        Batch Size: 32
+        Epochs: 15
+        Optimizer: Adam
+        Learning Rate: 0.0001
+        Loss Function: nn.BCEWithLogitsLoss (带 Sigmoid 的二元交叉熵损失)。
+    训练策略：
+        模型加载： ContextualFidelityModel 在初始化时，会加载 autoregression_feature_extractor_model.pt 的权重到其 HFS 编码器中。
+        评估： 训练循环中监控验证集的 Loss, Accuracy 和 F1-Score。
+    最终结果 (Final Results)：
+        Test Loss: 0.0440
+        Test Accuracy: 0.9874
+        Test Precision: 0.9540
+        Test Recall: 0.9765
+        Test F1-Score: 0.9651

@@ -129,12 +129,12 @@ def get_raw_data_chunk_direct():
         if SEND_REAL_DATA:
             # 提取真实数据块
             data_chunk = SCALED_RAW_DATA[CURRENT_INDEX : CURRENT_INDEX + chunk_size]
-            # print(f"Serving REAL data chunk: indices {CURRENT_INDEX} to {CURRENT_INDEX + chunk_size - 1}")
+            print(f"Serving REAL data chunk: indices {CURRENT_INDEX} to {CURRENT_INDEX + chunk_size - 1}")
         else:
             # 创建一个全零的数据块
             zero_shape = (chunk_size,) + DATA_ITEM_SHAPE
             data_chunk = np.zeros(zero_shape)
-            # print(f"Serving ZERO data chunk: indices {CURRENT_INDEX} to {CURRENT_INDEX + chunk_size - 1}")
+            print(f"Serving ZERO data chunk: indices {CURRENT_INDEX} to {CURRENT_INDEX + chunk_size - 1}")
 
         # 无论发送什么，索引都照常更新
         CURRENT_INDEX += chunk_size

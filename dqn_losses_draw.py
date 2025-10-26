@@ -2,8 +2,10 @@ import pandas as pd
 import io
 import matplotlib.pyplot as plt
 
+FILE_PATH = "model_runner_dqn_log_20251026_155720.csv"
+
 # 加载 CSV 数据
-df = pd.read_csv("model_runner_dqn_log_20251025_202756.csv")  # 请替换为实际文件名
+df = pd.read_csv(FILE_PATH)  # 请替换为实际文件名
 
 # 创建一个 'Step' 列（使用索引）作为 X 轴
 df['Step'] = df.index
@@ -31,7 +33,7 @@ ax2.grid(True) # 显示网格
 plt.tight_layout()
 
 # 保存图像到文件
-plot_filename = "training_curves.png"
+plot_filename = f"training_curves_{FILE_PATH[21:]}.png"
 plt.savefig(plot_filename)
 
 print(f"图像已保存到 {plot_filename}")

@@ -28,4 +28,6 @@ model_runner_dqn_log_*.csv
 
 logs/
 
-training_curves.png
+training_curves_*.png
+
+.vscode/
