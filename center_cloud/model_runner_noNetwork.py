@@ -37,7 +37,8 @@ REPLAY_BUFFER_SIZE = 10000
 BATCH_SIZE = 32
 GAMMA = 0.99              # 折扣因子
 LEARNING_RATE = 1e-4
-TARGET_UPDATE_FREQ = 200   # 每10步更新一次目标网络 (不必太频繁地更新目标网络)
+TARGET_UPDATE_FREQ = 200   # 每 x 步更新一次目标网络 (不必太频繁地更新目标网络)
+COST_PENALTY = 0.1        # 新增：每次选择 action=1 (同步) 时的惩罚值
 
 # ===================================================================
 # --- DQN 定义 ---
@@ -53,7 +54,7 @@ class QNetwork(nn.Module):
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        return self.fc3(x)  # ? why no ReLU
+        return self.fc3(x)
 
 class ReplayBuffer:
     def __init__(self, capacity):
@@ -65,7 +66,7 @@ class ReplayBuffer:
     def sample(self, batch_size):
         states, actions, rewards, next_states, dones = zip(*random.sample(self.buffer, batch_size))
         
-        states = torch.cat(states)  # ?
+        states = torch.cat(states)
         actions = torch.tensor(actions, dtype=torch.int64).unsqueeze(1)
         rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
         next_states = torch.cat(next_states)
@@ -332,20 +333,25 @@ def simulate_training_loop(model, agent: DQNAgent):
         prediction_prob = torch.sigmoid(logits).item()
         prediction = 1 if prediction_prob > 0.5 else 0
         
-        # 6. (DQN) 定义奖励 (Reward Shaping)
+       # 6. (DQN) 定义奖励 (Reward Shaping)
         true_label = label_sequence[-1]
         
-        # --- 基于概率的精细化奖励塑形 ---
+        # --- 步骤 6a: 计算 "准确率奖励" (Accuracy Reward) ---
         if true_label == 1:
             # 真实是 "摔倒" (1)
-            # 奖励 = 2p - 1
-            # (p=0.9 -> +0.8; p=0.2 -> -0.6)
-            reward = 2 * prediction_prob - 1
+            accuracy_reward = 2 * prediction_prob - 1
         else: 
             # 真实是 "非摔倒" (0)
-            # 奖励 = 1 - 2p
-            # (p=0.2 -> +0.6; p=0.9 -> -0.8)
-            reward = 1 - 2 * prediction_prob
+            accuracy_reward = 1 - 2 * prediction_prob
+        
+        # --- 步骤 6b: 施加 "动作成本惩罚" (Action Cost) ---
+        # 这是为了鼓励DQN在"非必要"时(即准确率增益不大时)不选择 action=1
+        action_cost = 0.0
+        if action == 1:
+            action_cost = COST_PENALTY # 施加一个固定的惩罚
+
+        # 最终奖励 = 准确率奖励 - 动作成本
+        reward = accuracy_reward - action_cost
         # --- 奖励塑形结束 ---
 
         agent.train_rewards.append(reward)
