@@ -17,7 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 # --- (新增) 导入本地模块的函数 ---
 from feature_pool import load_data as load_feature_data, get_feature_direct
-from history_data_pool import load_and_prepare_data as load_history_data, get_raw_data_chunk_direct, set_instruction_direct
+from history_data_pool import load_and_prepare_data as load_history_data, get_raw_data_slice_direct, set_instruction_direct
 # ---------------------------------
 
 timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -40,13 +40,11 @@ BATCH_SIZE = 32
 GAMMA = 0.99              # 折扣因子
 LEARNING_RATE = 1e-4
 TARGET_UPDATE_FREQ = 200   # 每 x 步更新一次目标网络 (不必太频繁地更新目标网络)
-COST_PENALTY = 0.5        # 新增：每次选择 action=1 (同步) 时的惩罚值
+COST_PENALTY = 0.1        # 新增：每次选择 action=1 (同步) 时的惩罚值
 
 # ===================================================================
 # --- DQN 定义 ---
 # ===================================================================
-
-
 
 class QNetwork(nn.Module):
     def __init__(self, state_dim, action_dim):
@@ -241,15 +239,24 @@ def simulate_training_loop(model, agent: DQNAgent):
     correct_predictions = 0
     save_counter = 0
     param_rows = []
+
     actions_list = []
+
+    history_data_sequence = []
+
+    position_index = 4
+
+    
 
     # --- 获取初始状态 (s_0) ---
     print("Getting initial state (s_0)...")
-    send_action(1) # 第一次强制发送真实数据
+
     
     # 第一次循环以获取 s_0
     for i in range(SEQUENCE_LENGTH):
-        # time.sleep(REQUEST_INTERVAL_SECONDS)
+        send_action(1) # 第一批强制发送真实数据
+
+        actions_list.append(1)
         
         # (修改) 直接调用函数
         data, status_code = get_feature_direct()
@@ -258,21 +265,23 @@ def simulate_training_loop(model, agent: DQNAgent):
         
         feature_sequence.append(data['feature'])
         label_sequence.append(data['label'])
+        
+        raw_data_response, raw_status_code = get_raw_data_slice_direct()
+        if raw_status_code != 200:
+                raise Exception(f"Failed to get history slice: {raw_data_response.get('error')}")
+        history_data_sequence.append(raw_data_response['data_slice'])
     
-    # (修改) 直接调用函数
-    raw_data_response, raw_status_code = get_raw_data_chunk_direct()
-    if raw_status_code != 200:
-            raise Exception(f"Failed to get history chunk: {raw_data_response.get('error')}")
-    raw_data_chunk = raw_data_response['data_chunk']
     
-    feature_tensor = torch.tensor(np.array(feature_sequence), dtype=torch.float32).unsqueeze(0)
-    raw_data_tensor = torch.tensor(np.array(raw_data_chunk), dtype=torch.float32).unsqueeze(0)
-    
+    feature_tensor = torch.tensor(np.array(feature_sequence[position_index-4:position_index]), dtype=torch.float32).unsqueeze(0)
+    raw_data_tensor = torch.tensor(np.array(history_data_sequence[position_index-4:position_index]), dtype=torch.float32).unsqueeze(0)
+
     with torch.no_grad():
         _, current_state = model(feature_tensor, raw_data_tensor) # (logits, state_features)
         
-    feature_sequence.clear()
-    label_sequence.clear()
+    # feature_sequence.clear()
+    # label_sequence.clear()
+    # history_data_sequence.clear()
+    position_index += 1
     print("Initial state received. Starting training loop...")
         
     # --- 初始状态获取完毕 ---
@@ -295,37 +304,33 @@ def simulate_training_loop(model, agent: DQNAgent):
         send_action(action)
         
         # 3. (Runner) 运行环境一步：获取特征和原始数据
-        for i in range(SEQUENCE_LENGTH):
-            # print(f"Waiting {REQUEST_INTERVAL_SECONDS} seconds...") # 注释掉以加速
-            # time.sleep(REQUEST_INTERVAL_SECONDS)
             
-            # (修改) 直接调用函数
-            data, status_code = get_feature_direct()
-            if status_code == 404:
-                print("Feature pool reports end of data. Simulation finished.")                    
-                return
-            elif status_code != 200:
-                # 抛出异常，由外部 try-except 处理
-                raise Exception(f"Error from feature pool: {data.get('error')}")
-            
-            feature_sequence.append(data['feature'])
-            label_sequence.append(data['label'])
+        # 直接调用函数
+        data, status_code = get_feature_direct()
+        if status_code == 404:
+            print("Feature pool reports end of data. Simulation finished.")                    
+            return
+        elif status_code != 200:
+            # 抛出异常，由外部 try-except 处理
+            raise Exception(f"Error from feature pool: {data.get('error')}")
+        
+        feature_sequence.append(data['feature'])
+        label_sequence.append(data['label'])
 
-        # (修改) 直接调用函数
-        raw_data_response, raw_status_code = get_raw_data_chunk_direct()
-        if raw_status_code == 404:
+        # 将一次获取4条历史数据改为一次获取1条
+        history_data_response, history_status_code = get_raw_data_slice_direct()
+        if history_status_code == 404:
             print("History data pool reports end of data. Simulation finished.")
             return
-        elif raw_status_code != 200:
-            raise Exception(f"Error from history pool: {raw_data_response.get('error')}")
-        
-        raw_data_chunk = raw_data_response['data_chunk']
-        raw_data_array = np.array(raw_data_chunk)
+        elif history_status_code != 200:
+            raise Exception(f"Error from history pool: {history_data_response.get('error')}")
+
+        history_data_sequence.append(history_data_response['data_slice'])
 
         # 4. (Runner) 准备模型输入
-        feature_tensor = torch.tensor(np.array(feature_sequence), dtype=torch.float32).unsqueeze(0)
-        raw_data_tensor = torch.tensor(raw_data_array, dtype=torch.float32).unsqueeze(0)
-        
+        feature_tensor = torch.tensor(np.array(feature_sequence[position_index-4:position_index]), dtype=torch.float32).unsqueeze(0)
+        raw_data_tensor = torch.tensor(np.array(history_data_sequence[position_index-4:position_index]), dtype=torch.float32).unsqueeze(0)
+
         # 5. (Fidelity Model Runner) 观察 r_t 和 s_{t+1}
         if is_print:
             print("  - Running Fidelity model inference...")
@@ -386,39 +391,38 @@ def simulate_training_loop(model, agent: DQNAgent):
         #     agent.update_target_network()
 
         # 10. (Runner) 日志记录
-        # 10. (Runner) 日志记录
         true_label = label_sequence[-1]
         total_predictions += 1
         is_correct = (prediction == true_label)
         if is_correct:
             correct_predictions += 1
-        
-        if is_print:
-            print(f"  - Prediction: {prediction} (Reward/Prob: {reward:.4f})")
-            print(f"  - True Label: {true_label}")
-        
+            
         current_accuracy = (correct_predictions / total_predictions) * 100
-        if is_print:
-            print(f"  - Cumulative Accuracy: {current_accuracy:.2f}% ({correct_predictions}/{total_predictions})")
+        # if is_print:
+        #     print(f"  - Prediction: {prediction} (Reward/Prob: {reward:.4f})")
+        #     print(f"  - True Label: {true_label}")
+        #     print(f"  - Cumulative Accuracy: {current_accuracy:.2f}% ({correct_predictions}/{total_predictions})")
+        
 
         # 11. (Runner) 清空列表，为下一个序列做准备
-        feature_sequence.clear()
-        label_sequence.clear()
+        # 调整为滑动窗口模式，故不再清空整个列表
+        # feature_sequence.clear()
+        # label_sequence.clear()
+        # history_data_sequence.clear()
 
-        # 12. (Runner) 统计预测情况
-        if save_counter >= 75:
-            zero_vectors_count = np.sum(np.all(raw_data_array == 0, axis=(1, 2)))
+        # 12. (Runner) 统计过去100次预测情况
+        if save_counter >= 100:
+            current_seq = np.array(history_data_sequence[position_index-4:position_index])
+            zero_vectors_count = np.sum(np.all(current_seq == 0, axis=(1, 2)))
             # 统计action1分布 (保留两位小数)
-            action1_ratio = sum(a == 1 for a in actions_list) / len(actions_list) if actions_list else 0
+            action1_temp_list = actions_list[position_index-100:position_index]
+            action1_ratio = sum(a == 1 for a in action1_temp_list) / len(action1_temp_list) if action1_temp_list else 0
             param_rows.append({
-                "Zero_Vectors_Ratio": zero_vectors_count / raw_data_array.shape[0],
+                "Zero_Vectors_Ratio": zero_vectors_count / SEQUENCE_LENGTH,
                 "Probability": reward,
-                "Predict_Label": prediction,
-                "True_Label": true_label,
-                "Result": 1 if is_correct else 0,
                 "DQN Action": action,
-                "Cumulative_Accuracy": current_accuracy,
                 "DQN Loss": loss if loss is not None else -1,
+                "Cumulative_Accuracy": current_accuracy,
                 "Action_1_Ratio": '{:.2f}'.format(action1_ratio)
             })
             df = pd.DataFrame(param_rows)
@@ -429,9 +433,15 @@ def simulate_training_loop(model, agent: DQNAgent):
             save_counter = 0
             param_rows.clear()
             is_print = True
+            # 清零统计正确率的计数器，以便重新统计
+            correct_predictions = 0
+            total_predictions = 0
         else:
             save_counter += 1
             is_print = False
+        
+        # 13. (Runner) 更新 position_index
+        position_index += 1
 
 
 # --- 主程序入口 ---    
