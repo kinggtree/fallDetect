@@ -158,7 +158,7 @@ def get_raw_data_slice_direct():
         # 无论发送什么，索引都照常更新
         CURRENT_INDEX_IN_SUBJECT += 1
         
-        # 【关键】检查是否是该受试者的最后一条数据
+        # 检查是否是该受试者的最后一条数据
         if CURRENT_INDEX_IN_SUBJECT == len(current_subject_data):
             is_done = True
             print(f"--- Just served the last sequence for subject index {CURRENT_SUBJECT_INDEX}. Setting is_done=True. ---")

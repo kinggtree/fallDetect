@@ -1,0 +1,22 @@
+要什么
+UMAFALL文件夹结构，及其包含的所有文件名
+其中一个文件（上传上去）
+UMAFALL的论文中的详细数据（如采样率）
+
+我要它干什么
+第一，调整模型原始代码，让其适配新的数据集
+第二，数据集的读取的时候，顺序读取的同时，在保证都是同一个受试者的情况下，打乱fall和ADL（以每一个活动，如aplausing为单位打乱）
+
+注意事项
+不要手机数据（即sensor id 为0的数据不要）
+sensor tag的采样率为20Hz，也就是如果保持4秒一个向量的话，其输出的维度应该为(xxxx,80,11)
+对应的模型结构也要调整
+原来代码中的ori改为UMAFall的Magnetometer
+只采用sensor id为3的数据
+
+在数据集中，Sensor_Type对应如下：
+% Sensor_Type:                                                                     
+% Accelerometer = 0                                                                
+% Gyroscope = 1                                                                    
+% Magnetometer = 2   
+

@@ -16,7 +16,8 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 
 # --- (新增) 导入本地模块的函数 ---
-from pools_function import load_and_prepare_data as load_history_data, get_raw_data_slice_direct, set_instruction_direct, get_feature_direct, next_subject_direct
+from feature_pool import load_data as load_feature_data, get_feature_direct
+from history_data_pool import load_and_prepare_data as load_history_data, get_raw_data_slice_direct, set_instruction_direct
 # ---------------------------------
 
 timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -245,8 +246,6 @@ def simulate_training_loop(model, agent: DQNAgent):
 
     position_index = 4
 
-    is_done = 0
-
     
 
     # --- 获取初始状态 (s_0) ---
@@ -254,16 +253,12 @@ def simulate_training_loop(model, agent: DQNAgent):
 
     
     # 第一次循环以获取 s_0
-    for _ in range(SEQUENCE_LENGTH):
+    for i in range(SEQUENCE_LENGTH):
         send_action(1) # 第一批强制发送真实数据
 
         actions_list.append(1)
-
-        raw_data_response, raw_status_code = get_raw_data_slice_direct()
-        if raw_status_code != 200:
-                raise Exception(f"Failed to get history slice: {raw_data_response.get('error')}")
-        history_data_sequence.append(raw_data_response['data_slice'])
         
+        # (修改) 直接调用函数
         data, status_code = get_feature_direct()
         if status_code != 200:
             raise Exception(f"Failed to get feature: {data.get('error')}")
@@ -271,9 +266,10 @@ def simulate_training_loop(model, agent: DQNAgent):
         feature_sequence.append(data['feature'])
         label_sequence.append(data['label'])
         
-        # 检查初始受试者是否在初始化期间就结束了
-        is_done = raw_data_response['is_done']
-        
+        raw_data_response, raw_status_code = get_raw_data_slice_direct()
+        if raw_status_code != 200:
+                raise Exception(f"Failed to get history slice: {raw_data_response.get('error')}")
+        history_data_sequence.append(raw_data_response['data_slice'])
     
     
     feature_tensor = torch.tensor(np.array(feature_sequence[position_index-4:position_index]), dtype=torch.float32).unsqueeze(0)
@@ -282,6 +278,9 @@ def simulate_training_loop(model, agent: DQNAgent):
     with torch.no_grad():
         _, current_state = model(feature_tensor, raw_data_tensor) # (logits, state_features)
         
+    # feature_sequence.clear()
+    # label_sequence.clear()
+    # history_data_sequence.clear()
     position_index += 1
     print("Initial state received. Starting training loop...")
         
@@ -295,31 +294,35 @@ def simulate_training_loop(model, agent: DQNAgent):
 
         # 1. (DQN) 根据当前状态 s_t 选择动作 a_t
         action = agent.select_action(current_state)
+
         actions_list.append(action)
 
-        # 2. 执行动作 a_t (发送指示)
+        # 2. (HTTP) 执行动作 a_t (发送指示)
         send_action(action)
         
         # 3. (Runner) 运行环境一步：获取特征和原始数据
-
-        # 将一次获取4条历史数据改为一次获取1条
-        history_data_response, history_status_code = get_raw_data_slice_direct()
-        # 【修改】不再检查404，只检查非200的通用错误
-        if history_status_code != 200:
-            raise Exception(f"Error from history pool: {history_data_response.get('error')}")
             
         # 直接调用函数
         data, status_code = get_feature_direct()
-        # 【修改】不再检查404
-        if status_code != 200:
+        if status_code == 404:
+            print("Feature pool reports end of data. Simulation finished.")                    
+            return
+        elif status_code != 200:
+            # 抛出异常，由外部 try-except 处理
             raise Exception(f"Error from feature pool: {data.get('error')}")
         
         feature_sequence.append(data['feature'])
         label_sequence.append(data['label'])
-        history_data_sequence.append(history_data_response['data_slice'])
 
-        # 【修改】将 'is_done' 捕获到一个局部变量 'is_done_flag'
-        is_done_flag = history_data_response['is_done']
+        # 将一次获取4条历史数据改为一次获取1条
+        history_data_response, history_status_code = get_raw_data_slice_direct()
+        if history_status_code == 404:
+            print("History data pool reports end of data. Simulation finished.")
+            return
+        elif history_status_code != 200:
+            raise Exception(f"Error from history pool: {history_data_response.get('error')}")
+
+        history_data_sequence.append(history_data_response['data_slice'])
 
         # 4. (Runner) 准备模型输入
         feature_tensor = torch.tensor(np.array(feature_sequence[position_index-4:position_index]), dtype=torch.float32).unsqueeze(0)
@@ -329,6 +332,8 @@ def simulate_training_loop(model, agent: DQNAgent):
         logits = None
         next_state = None
         
+        # 只在获取奖励和下一个状态时使用 no_grad()
+        # DQN 的 policy_net 训练是在 agent.learn() 中处理的
         with torch.no_grad():
             logits, next_state = model(feature_tensor, raw_data_tensor)
             
@@ -338,16 +343,23 @@ def simulate_training_loop(model, agent: DQNAgent):
        # 6. (DQN) 定义奖励 (Reward Shaping)
         true_label = label_sequence[-1]
         
+        # --- 步骤 6a: 计算 "准确率奖励" (Accuracy Reward) ---
         if true_label == 1:
+            # 真实是 "摔倒" (1)
             accuracy_reward = 2 * prediction_prob - 1
         else: 
+            # 真实是 "非摔倒" (0)
             accuracy_reward = 1 - 2 * prediction_prob
         
+        # --- 步骤 6b: 施加 "动作成本惩罚" (Action Cost) ---
+        # 这是为了鼓励DQN在"非必要"时(即准确率增益不大时)不选择 action=1
         action_cost = 0.0
         if action == 1:
-            action_cost = COST_PENALTY 
-        
+            action_cost = COST_PENALTY # 施加一个固定的惩罚
+
+        # 最终奖励 = 准确率奖励 - 动作成本
         reward = accuracy_reward - action_cost
+        # --- 奖励塑形结束 ---
 
         agent.train_rewards.append(reward)
         if prediction == true_label:
@@ -356,17 +368,20 @@ def simulate_training_loop(model, agent: DQNAgent):
             agent.train_fidelities.append(0)
         
         # 7. (DQN) 存储 (s_t, a_t, r_t, s_{t+1}, done)
-        # 【修改】使用 is_done_flag 来确定 'done' (1 或 0)
-        done = 1 if is_done_flag else 0
+        # 这是一个连续任务，没有"回合结束"状态。
+        # 真正的结束（数据耗尽）会通过404错误处理，此时不会push到缓冲区。
+        done = 0 
         agent.replay_buffer.push(current_state, action, reward, next_state, done)
-        if is_done_flag:
-            print("Done once.")
         
         # 8. (DQN) 更新 s_t = s_{t+1}
         current_state = next_state
         
         # 8. (DQN) 训练
         loss = agent.learn()
+
+        # # 9. (DQN) 更新目标网络
+        # if step % TARGET_UPDATE_FREQ == 0:
+        #     agent.update_target_network()
 
         # 10. (Runner) 日志记录
         true_label = label_sequence[-1]
@@ -375,13 +390,25 @@ def simulate_training_loop(model, agent: DQNAgent):
         if is_correct:
             correct_predictions += 1
             
-        current_accuracy = (correct_predictions / total_predictions) * 100 if total_predictions > 0 else 0
+        current_accuracy = (correct_predictions / total_predictions) * 100
+        # if is_print:
+        #     print(f"  - Prediction: {prediction} (Reward/Prob: {reward:.4f})")
+        #     print(f"  - True Label: {true_label}")
+        #     print(f"  - Cumulative Accuracy: {current_accuracy:.2f}% ({correct_predictions}/{total_predictions})")
+        
+
+        # 11. (Runner) 清空列表，为下一个序列做准备
+        # 调整为滑动窗口模式，故不再清空整个列表
+        # feature_sequence.clear()
+        # label_sequence.clear()
+        # history_data_sequence.clear()
 
         # 12. (Runner) 统计过去 100 次预测情况
         statistic_length = 100
         if save_counter >= statistic_length:
             current_seq = np.array(history_data_sequence[position_index-statistic_length:position_index])
             zero_vectors_count = np.sum(np.all(current_seq == 0, axis=(1, 2)))
+            # 统计action1分布 (保留两位小数)
             action1_temp_list = actions_list[position_index-statistic_length:position_index]
             action1_ratio = sum(a == 1 for a in action1_temp_list) / len(action1_temp_list) if action1_temp_list else 0
             param_rows.append({
@@ -392,10 +419,12 @@ def simulate_training_loop(model, agent: DQNAgent):
                 "Action_1_Ratio": '{:.2f}'.format(action1_ratio)
             })
             df = pd.DataFrame(param_rows)
+            # 保存带时间戳的文件
             df.to_csv(LOG_PATH, mode='a', header=not pd.io.common.file_exists(LOG_PATH), index=False)
             save_counter = 0
             param_rows.clear()
             is_print = True
+            # 清零统计正确率的计数器，以便重新统计
             correct_predictions = 0
             total_predictions = 0
         else:
@@ -405,70 +434,13 @@ def simulate_training_loop(model, agent: DQNAgent):
         # 13. (Runner) 更新 position_index
         position_index += 1
 
-        # --- 14. 处理 Episode 结束 ---
-        # 我们使用 'while' 循环来处理边缘情况：即新受试者的数据也可能非常短（< 4）
-        while is_done_flag:
-            print(f"\n--- Subject finished (Step {step}). Moving to next subject... ---")
-
-            # 14a. 告诉数据池切换到下一个受试者
-            response, status_code = next_subject_direct()
-
-            if status_code == 404:
-                # 这是真正的训练结束，所有受试者都已处理完毕
-                print("All subjects processed. Simulation finished.")
-                return  # 退出 simulate_training_loop
-
-            # 14b. 为新受试者获取新的初始状态 s_0
-            print("Getting initial state (s_0) for new subject...")
-            is_done_flag = False  # 重置标志，假设新受试者是正常的
-            
-            for i in range(SEQUENCE_LENGTH):
-                send_action(1)  # 强制发送真实数据
-                actions_list.append(1)
-
-                raw_data_response, raw_status_code = get_raw_data_slice_direct()
-                if raw_status_code != 200:
-                    print(f"Error getting initial data for new subject: {raw_data_response.get('error')}. Stopping.")
-                    return
-                
-                # 检查这个新受试者是否在初始化时也结束了
-                if raw_data_response['is_done']:
-                    is_done_flag = True # 这将使 'while is_done_flag' 循环再次运行
-
-                history_data_sequence.append(raw_data_response['data_slice'])
-
-                data, status_code = get_feature_direct()
-                if status_code != 200:
-                    print(f"Error getting initial feature for new subject: {data.get('error')}. Stopping.")
-                    return
-
-                feature_sequence.append(data['feature'])
-                label_sequence.append(data['label'])
-
-                # 为这些初始化步骤更新计数器
-                position_index += 1
-                step += 1
-
-            # 14c. 计算新的 s_0
-            feature_tensor_init = torch.tensor(np.array(feature_sequence[position_index-4:position_index]), dtype=torch.float32).unsqueeze(0)
-            raw_data_tensor_init = torch.tensor(np.array(history_data_sequence[position_index-4:position_index]), dtype=torch.float32).unsqueeze(0)
-
-            with torch.no_grad():
-                # 用新的 s_0 覆盖 'current_state'
-                _, current_state = model(feature_tensor_init, raw_data_tensor_init)
-
-            if is_done_flag:
-                print("--- WARNING: New subject finished during initialization. Looping to next subject... ---")
-            else:
-                print("New initial state received. Continuing training...")
-                # 如果 'is_done_flag' 为 False, 'while' 循环将在下次检查时退出
-
 
 # --- 主程序入口 ---    
 if __name__ == '__main__':
     
     # 0. (新增) 首先加载所有数据
     print("--- Initializing Data Pools ---")
+    load_feature_data()
     load_history_data()
     print("--- Data Pools Ready ---")
 

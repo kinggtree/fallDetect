@@ -21,7 +21,7 @@ TARGET_SAMPLING_PERIOD = f"{int(1000 / TARGET_SAMPLING_RATE_HZ)}ms"
 WINDOW_SECONDS = 4
 WINDOW_SIZE = int(TARGET_SAMPLING_RATE_HZ * WINDOW_SECONDS) # x samples for y seconds at 50Hz
 
-STEP_SECONDS = 2 # x秒步长
+STEP_SECONDS = 1 # x秒步长
 STEP = int(TARGET_SAMPLING_RATE_HZ * STEP_SECONDS)          # 50*x samples for x second step at 50Hz
 
 SENSOR_CODES = ["acc", "gyro", "ori"]

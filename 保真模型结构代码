@@ -8,7 +8,7 @@ graph TD
 
         %% Processing Blocks
         LFS["lfs_processor<br/>(LSTM)"]
-        HFS["hfs_processor<br/>(TimeDistributed Encoder)"]
+        HFS["hfs_processor<br/>(Autoregression Encoder)"]
         CA[CrossAttention]
         CONCAT[Concatenate Features]
         PFP["post_fusion_processor<br/>(LSTM)"]
