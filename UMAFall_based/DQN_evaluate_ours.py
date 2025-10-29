@@ -28,9 +28,12 @@ timestamp = time.strftime("%Y%m%d_%H%M%S")
 # INSTRUCTION_URL = "http://127.0.0.1:5005/set_instruction" # 控制DQN的动作
 # ---------------------------------
 MODEL_PATH = ".\\contextual_fidelity_model_pretrained_encoder.pth"
-LOG_PATH = f"model_runner_dqn_log_{timestamp}.csv"
+LOG_PATH = f"DQN_evaluate_ours_{timestamp}.csv"
 REQUEST_INTERVAL_SECONDS = 0.05 # 每 x 秒请求一次特征
 SEQUENCE_LENGTH = 4             # 累积 x 个 (REQUEST_SAMPLE_COUNT, 200, 11) 特征后进行一次推理
+
+# --- !! 指定您预训练好的DQN模型路径 !! ---
+PRETRAINED_DQN_PATH = ".\\dqn_agent_final_lazySync.pth" # <--- 请修改为您模型的实际路径
 
 # --- DQN 超参数 ---
 STATE_DIM = 256           # 状态维度 (来自保真模型 LSTM_HIDDEN_DIM)
@@ -40,7 +43,7 @@ BATCH_SIZE = 32
 GAMMA = 0.99              # 折扣因子
 LEARNING_RATE = 1e-4
 TARGET_UPDATE_FREQ = 200   # 每 x 步更新一次目标网络 (不必太频繁地更新目标网络)
-COST_PENALTY = 0.05        # 新增：每次选择 action=1 (同步) 时的惩罚值
+COST_PENALTY = 0.1        # 新增：每次选择 action=1 (同步) 时的惩罚值
 
 # ===================================================================
 # --- DQN 定义 ---
@@ -299,7 +302,7 @@ def simulate_training_loop(model, agent: DQNAgent):
 
         # 2. (HTTP) 执行动作 a_t (发送指示)
         send_action(action)
-        
+
         # 3. (Runner) 运行环境一步：获取特征和原始数据
             
         # 直接调用函数
@@ -368,20 +371,20 @@ def simulate_training_loop(model, agent: DQNAgent):
             agent.train_fidelities.append(0)
         
         # 7. (DQN) 存储 (s_t, a_t, r_t, s_{t+1}, done)
-        # 这是一个连续任务，没有"回合结束"状态。
-        # 真正的结束（数据耗尽）会通过404错误处理，此时不会push到缓冲区。
-        done = 0 
-        agent.replay_buffer.push(current_state, action, reward, next_state, done)
+        loss = None # 在评估模式下，损失默认为 None
+
+        if not agent.is_test:
+            # 只有在训练模式下才存储经验并学习
+            done = 0 
+            agent.replay_buffer.push(current_state, action, reward, next_state, done)
         
         # 8. (DQN) 更新 s_t = s_{t+1}
         current_state = next_state
         
         # 8. (DQN) 训练
-        loss = agent.learn()
-
-        # # 9. (DQN) 更新目标网络
-        # if step % TARGET_UPDATE_FREQ == 0:
-        #     agent.update_target_network()
+        if not agent.is_test:
+            # 只有在训练模式下才执行学习步骤
+            loss = agent.learn()
 
         # 10. (Runner) 日志记录
         true_label = label_sequence[-1]
@@ -391,20 +394,9 @@ def simulate_training_loop(model, agent: DQNAgent):
             correct_predictions += 1
             
         current_accuracy = (correct_predictions / total_predictions) * 100
-        # if is_print:
-        #     print(f"  - Prediction: {prediction} (Reward/Prob: {reward:.4f})")
-        #     print(f"  - True Label: {true_label}")
-        #     print(f"  - Cumulative Accuracy: {current_accuracy:.2f}% ({correct_predictions}/{total_predictions})")
-        
 
-        # 11. (Runner) 清空列表，为下一个序列做准备
-        # 调整为滑动窗口模式，故不再清空整个列表
-        # feature_sequence.clear()
-        # label_sequence.clear()
-        # history_data_sequence.clear()
-
-        # 12. (Runner) 统计过去 100 次预测情况
-        statistic_length = 100
+        # 12. (Runner) 统计过去 20 次预测情况
+        statistic_length = 20
         if save_counter >= statistic_length:
             current_seq = np.array(history_data_sequence[position_index-statistic_length:position_index])
             zero_vectors_count = np.sum(np.all(current_seq == 0, axis=(1, 2)))
@@ -435,8 +427,9 @@ def simulate_training_loop(model, agent: DQNAgent):
         position_index += 1
 
 
-# --- 主程序入口 ---    
 if __name__ == '__main__':
+
+    # ----------------------------------------
     
     # 0. (新增) 首先加载所有数据
     print("--- Initializing Data Pools ---")
@@ -447,16 +440,29 @@ if __name__ == '__main__':
     # 1. 加载预训练的 ContextualFidelityModel
     context_model = load_model(MODEL_PATH)
     
-    # 2. 初始化DQN Agent
-    dqn_agent = DQNAgent(state_dim=STATE_DIM, action_dim=ACTION_DIM, is_test=False, is_tb=True)
+    # 2. 初始化DQN Agent (评估模式)
+    print(f"--- Initializing DQN Agent in EVALUATION Mode (is_test=True) ---")
+    # is_test=True: 确保 agent.select_action() 使用贪婪策略
+    # is_tb=False: 评估时通常不需要开启 TensorBoard
+    dqn_agent = DQNAgent(state_dim=STATE_DIM, action_dim=ACTION_DIM, is_test=True, is_tb=False)
     
-    # 3. 启动主训练循环
+    # 2b. 加载预训练的 DQN 模型
+    try:
+        dqn_agent.load_model(PRETRAINED_DQN_PATH)
+        print(f"Successfully loaded pretrained DQN model from: {PRETRAINED_DQN_PATH}")
+    except FileNotFoundError:
+        print(f"[Error] Pretrained DQN model not found at: {PRETRAINED_DQN_PATH}")
+        print("Please check the path and try again.")
+        exit() # 退出脚本
+    except Exception as e:
+        print(f"[Error] An error occurred while loading the model: {e}")
+        exit() # 退出脚本
+    
+    # 3. 启动主评估循环
+    print("--- Starting Evaluation Loop ---")
     simulate_training_loop(context_model, dqn_agent)
 
-    # 4. 训练结束后保存模型
-    # (无论是因为数据耗尽还是Ctrl+C，循环结束后都会执行到这里)
-    print("\nTraining loop finished. Saving DQN agent model...")
-    save_path = "dqn_agent_final.pth"
-    dqn_agent.save_model(save_path)
-    print(f"DQN model saved to {save_path}")
+    # 4. 评估结束
+    print("\nEvaluation loop finished.")
+    # (评估模式下不需要重新保存模型)
 
