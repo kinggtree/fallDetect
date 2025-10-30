@@ -34,7 +34,7 @@ REQUEST_INTERVAL_SECONDS = 0.05 # 每 x 秒请求一次特征
 SEQUENCE_LENGTH = 4             # 累积 x 个 (REQUEST_SAMPLE_COUNT, 200, 11) 特征后进行一次推理
 
 # --- !! 指定您预训练好的DQN模型路径 !! ---
-PRETRAINED_DQN_PATH = ".\\dqn_agent_final_lazySync.pth" # <--- 请修改为您模型的实际路径
+PRETRAINED_DQN_PATH = ".\\dqn_agent_final.pth" # <--- 请修改为您模型的实际路径
 
 # --- DQN 超参数 ---
 STATE_DIM = 256           # 状态维度 (来自保真模型 LSTM_HIDDEN_DIM)
@@ -48,7 +48,7 @@ COST_PENALTY = 0.1        # 新增：每次选择 action=1 (同步) 时的惩罚
 
 # --- (新增) Baseline 配置 ---
 USE_BASELINE_ACTION_GENERATOR = True # 设置为 True 以启用 Baseline 模式
-RATIO_OF_REAL_DATA = 0.4        # 当使用 Baseline 模式时，发送真实数据的比例
+RATIO_OF_REAL_DATA = 0.2        # 当使用 Baseline 模式时，发送真实数据的比例
 BASELINE_BURST_LENGTH = 80*RATIO_OF_REAL_DATA           # “高潮”：连续发送 action=1 的数量
 BASELINE_GAP_LENGTH = 80*(1-RATIO_OF_REAL_DATA)             # “低潮”：连续发送 action=0 的数量 (必须是 BURST_LENGTH 的3倍)
 

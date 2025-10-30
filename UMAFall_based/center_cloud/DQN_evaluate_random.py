@@ -25,7 +25,7 @@ timestamp = time.strftime("%Y%m%d_%H%M%S")
 
 # --- (新增) Baseline 配置 ---
 USE_BASELINE_ACTION_GENERATOR = True # 设置为 True 以启用 Baseline 模式
-RANDOM_RATIO = 0.8                   # 当 USE_BASELINE_ACTION_GENERATOR=True 时生效
+RANDOM_RATIO = 0.2                   # 当 USE_BASELINE_ACTION_GENERATOR=True 时生效
 # ---------------------------------
 MODEL_PATH = "UMAFall_contextual_fidelity_model_pretrained_encoder.pth"
 LOG_PATH = f"UMA_DQN_evaluate_cloud_{timestamp}.csv"

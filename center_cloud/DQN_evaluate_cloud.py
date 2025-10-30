@@ -34,7 +34,7 @@ REQUEST_INTERVAL_SECONDS = 0.05 # 每 x 秒请求一次特征
 SEQUENCE_LENGTH = 4             # 累积 x 个 (REQUEST_SAMPLE_COUNT, 200, 11) 特征后进行一次推理
 
 # --- !! 指定您预训练好的DQN模型路径 !! ---
-PRETRAINED_DQN_PATH = ".\\dqn_agent_final_lazySync.pth" # <--- 请修改为您模型的实际路径
+PRETRAINED_DQN_PATH = ".\\dqn_agent_final.pth" # <--- 请修改为您模型的实际路径
 
 # --- DQN 超参数 ---
 STATE_DIM = 256           # 状态维度 (来自保真模型 LSTM_HIDDEN_DIM)
@@ -410,9 +410,9 @@ def simulate_training_loop(model, agent: DQNAgent):
             param_rows.append({
                 "Current_Step": position_index,
                 "DQN Loss": loss if loss is not None else -1,
-                "Zero_Vectors_Ratio": '{:.2f}'.format(zero_vectors_count / statistic_length),
+                "Zero_Vectors_Ratio": zero_vectors_count / statistic_length,  # 直接保存浮点数
                 "Cumulative_Accuracy": current_accuracy,
-                "Action_1_Ratio": '{:.2f}'.format(action1_ratio)
+                "Action_1_Ratio": action1_ratio  # 直接保存浮点数
             })
             save_counter = 0
             is_print = True

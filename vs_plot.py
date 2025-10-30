@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 # --- 1. 执行筛选操作 ---
 
 # 定义文件名
-output_file1 = 'DQN_evaluate_lazySync.csv'
-output_file2 = 'DQN_evaluate_ours.csv'
+output_file1 = 'DQN_evaluate_lazySync_xishu.csv'
+output_file2 = 'DQN_evaluate_ours_xishu.csv'
 
 # 定义绘图函数中使用的颜色
 colors = {

@@ -28,7 +28,7 @@ timestamp = time.strftime("%Y%m%d_%H%M%S")
 # FEATURE_POOL_URL = "http://127.0.0.1:5002/get_feature"
 # INSTRUCTION_URL = "http://127.0.0.1:5005/set_instruction" # 控制DQN的动作
 # ---------------------------------
-MODEL_PATH = "UMA_contextual_fidelity_model_pretrained_encoder.pth"
+MODEL_PATH = "UMAFall_contextual_fidelity_model_pretrained_encoder.pth"
 REQUEST_INTERVAL_SECONDS = 0.05 # 每 x 秒请求一次特征
 SEQUENCE_LENGTH = 4             # 累积 x 个 (REQUEST_SAMPLE_COUNT, 200, 11) 特征后进行一次推理
 
