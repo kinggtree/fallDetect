@@ -54,7 +54,7 @@ class ContextualFidelityModel(nn.Module):
     def __init__(self, lfs_feature_dim, lstm_hidden_dim, hfs_feature_dim, num_classes=1):
         super(ContextualFidelityModel, self).__init__()
 
-        hfs_encoder = Encoder(input_dim=11, hidden_dim=hfs_feature_dim, n_layers=2, dropout=0.1)
+        hfs_encoder = Encoder(input_dim=48, hidden_dim=hfs_feature_dim, n_layers=2, dropout=0.1)
         self.hfs_processor = TimeDistributedEncoder(hfs_encoder)
 
         self.lfs_processor = nn.LSTM(

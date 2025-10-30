@@ -18,16 +18,18 @@ from torch.utils.tensorboard import SummaryWriter
 # --- (新增) 导入本地模块的函数 ---
 from feature_pool import load_data as load_feature_data, get_feature_direct
 from history_data_pool import load_and_prepare_data as load_history_data, get_raw_data_slice_direct, set_instruction_direct
+from data_analysis import analyze_data
 # ---------------------------------
 
 timestamp = time.strftime("%Y%m%d_%H%M%S")
 
-# --- (新增) Baseline 配置 ---
-USE_BASELINE_ACTION_GENERATOR = True # 设置为 True 以启用 Baseline 模式
-RANDOM_RATIO = 0.5                   # 当 USE_BASELINE_ACTION_GENERATOR=True 时生效
+# --- (移除) 网络配置 ---
+# HISTORY_DATA_POOL_URL = "http://127.0.0.1:5001/get_raw_data_chunk"
+# FEATURE_POOL_URL = "http://127.0.0.1:5002/get_feature"
+# INSTRUCTION_URL = "http://127.0.0.1:5005/set_instruction" # 控制DQN的动作
 # ---------------------------------
-MODEL_PATH = ".\\contextual_fidelity_model_pretrained_encoder.pth"
-LOG_PATH = f"DQN_evaluate_random_{RANDOM_RATIO}_{timestamp}.csv"
+MODEL_PATH = "UMAFall_contextual_fidelity_model_pretrained_encoder.pth"
+LOG_PATH = f"UMA_DQN_evaluate_cloud_{timestamp}.csv"
 REQUEST_INTERVAL_SECONDS = 0.05 # 每 x 秒请求一次特征
 SEQUENCE_LENGTH = 4             # 累积 x 个 (REQUEST_SAMPLE_COUNT, 200, 11) 特征后进行一次推理
 
@@ -43,7 +45,6 @@ GAMMA = 0.99              # 折扣因子
 LEARNING_RATE = 1e-4
 TARGET_UPDATE_FREQ = 200   # 每 x 步更新一次目标网络 (不必太频繁地更新目标网络)
 COST_PENALTY = 0.1        # 新增：每次选择 action=1 (同步) 时的惩罚值
-
 
 # ===================================================================
 # --- DQN 定义 ---
@@ -295,17 +296,7 @@ def simulate_training_loop(model, agent: DQNAgent):
         if is_print:
             print(f"Current Step: {step}")
 
-        # 1. 根据模式选择动作 a_t
-        action = 0 # 默认 action
-        if USE_BASELINE_ACTION_GENERATOR:
-            # --- Baseline 模式: 随机决策 ---
-            if random.random() < RANDOM_RATIO:
-                action = 1 # 以设定的概率选择 action=1 (发送真实数据)
-            else:
-                action = 0 # 否则选择 action=0 (发送零向量)
-        else:
-            # --- DQN 模式: 智能体决策 ---
-            action = agent.select_action(current_state)
+        action = 1
 
         actions_list.append(action)
 
@@ -317,7 +308,9 @@ def simulate_training_loop(model, agent: DQNAgent):
         # 直接调用函数
         data, status_code = get_feature_direct()
         if status_code == 404:
-            print("Feature pool reports end of data. Simulation finished.")                    
+            print("Feature pool reports end of data. Simulation finished.")
+            df = pd.DataFrame(param_rows)
+            analyze_data(df)
             return
         elif status_code != 200:
             # 抛出异常，由外部 try-except 处理
@@ -330,6 +323,8 @@ def simulate_training_loop(model, agent: DQNAgent):
         history_data_response, history_status_code = get_raw_data_slice_direct()
         if history_status_code == 404:
             print("History data pool reports end of data. Simulation finished.")
+            df = pd.DataFrame(param_rows)
+            analyze_data(df)
             return
         elif history_status_code != 200:
             raise Exception(f"Error from history pool: {history_data_response.get('error')}")
@@ -419,11 +414,7 @@ def simulate_training_loop(model, agent: DQNAgent):
                 "Cumulative_Accuracy": current_accuracy,
                 "Action_1_Ratio": '{:.2f}'.format(action1_ratio)
             })
-            df = pd.DataFrame(param_rows)
-            # 保存带时间戳的文件
-            df.to_csv(LOG_PATH, mode='a', header=not pd.io.common.file_exists(LOG_PATH), index=False)
             save_counter = 0
-            param_rows.clear()
             is_print = True
             # 清零统计正确率的计数器，以便重新统计
             correct_predictions = 0

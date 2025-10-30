@@ -27,8 +27,8 @@ timestamp = time.strftime("%Y%m%d_%H%M%S")
 # FEATURE_POOL_URL = "http://127.0.0.1:5002/get_feature"
 # INSTRUCTION_URL = "http://127.0.0.1:5005/set_instruction" # 控制DQN的动作
 # ---------------------------------
-MODEL_PATH = ".\\contextual_fidelity_model_pretrained_encoder.pth"
-LOG_PATH = f"model_runner_dqn_log_{timestamp}.csv"
+MODEL_PATH = "UMAFall_contextual_fidelity_model_pretrained_encoder.pth"
+LOG_PATH = f"UMA_model_runner_dqn_log_{timestamp}.csv"
 REQUEST_INTERVAL_SECONDS = 0.05 # 每 x 秒请求一次特征
 SEQUENCE_LENGTH = 4             # 累积 x 个 (REQUEST_SAMPLE_COUNT, 200, 11) 特征后进行一次推理
 
@@ -40,7 +40,7 @@ BATCH_SIZE = 32
 GAMMA = 0.99              # 折扣因子
 LEARNING_RATE = 1e-4
 TARGET_UPDATE_FREQ = 200   # 每 x 步更新一次目标网络 (不必太频繁地更新目标网络)
-COST_PENALTY = 0.1        # 新增：每次选择 action=1 (同步) 时的惩罚值
+COST_PENALTY = 0.002        # 新增：每次选择 action=1 (同步) 时的惩罚值
 
 # ===================================================================
 # --- DQN 定义 ---
@@ -456,7 +456,7 @@ if __name__ == '__main__':
     # 4. 训练结束后保存模型
     # (无论是因为数据耗尽还是Ctrl+C，循环结束后都会执行到这里)
     print("\nTraining loop finished. Saving DQN agent model...")
-    save_path = "dqn_agent_final.pth"
+    save_path = "UMA_dqn_agent_final.pth"
     dqn_agent.save_model(save_path)
     print(f"DQN model saved to {save_path}")
 

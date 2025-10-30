@@ -1,0 +1,30 @@
+MobiFall
+random
+ratio accuracy
+0.2 91.6165
+0.4 94.5201
+0.6 97.0753
+0.8 98.1100
+
+uniform
+ratio accuracy
+0.2 90.6979
+0.4 93.1158
+0.6 94.9319
+0.8 96.9486
+
+
+UMAFall
+random
+ratio accuracy
+0.2 96.4196
+0.4 97.5653
+0.6 98.1919
+0.8 98.6216
+
+uniform
+ratio accuracy
+0.2 95.9542
+0.4 96.4017
+0.6 97.0820
+0.8 97.8518
